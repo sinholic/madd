@@ -1,0 +1,28 @@
+name: validate
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check skill frontmatter
+        run: |
+          fail=0
+          for skill in commands/madd-*.md; do
+            echo "Checking $skill"
+            head -10 "$skill" | grep -q '^version:' || { echo "MISSING version: $skill"; fail=1; }
+            head -10 "$skill" | grep -q '^description:' || { echo "MISSING description: $skill"; fail=1; }
+            head -10 "$skill" | grep -q '^---' || { echo "MISSING frontmatter delim: $skill"; fail=1; }
+          done
+          exit $fail
+
+      - name: Check install.sh syntax
+        run: bash -n install.sh
+
+      - name: Check install.sh executable
+        run: test -x install.sh || { echo "install.sh not executable"; exit 1; }
