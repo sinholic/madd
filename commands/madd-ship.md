@@ -1,9 +1,10 @@
 ---
 description: "Drive end-to-end feature delivery: Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production. SDD+TDD in 8 phases. Real tool invocations, not docs."
-argument-hint: "<feature description>"
-version: "2.0.0"
+argument-hint: "<feature description> [--member <name>]"
+version: "2.1.0"
 changelog: |
-  2.0.0 — Rewrite as operational runbook: real AskUserQuestion gating, real WORKLOG.md Edit, real PM detection, real auto-populated handoff
+  2.1.0 — Monorepo + workspace support: --member flag, root+member AGENTS.md merge in Phase 0, workspace parent refusal
+  2.0.0 — Operational runbook rewrite
   1.2.0 — Added madd-learn integration
   1.1.0 — Aspirational auto-validation
   1.0.0 — Initial 8-phase workflow
@@ -17,33 +18,69 @@ Follow steps in order. Use named tools. Do not advance until current phase passe
 
 ---
 
-## Step 0 — Pre-flight: read AGENTS.md
+## Step 0 — Pre-flight: read AGENTS.md (workspace-aware)
 
-### 0a. Locate repo root
+### 0a. Parse args & locate repo root
+
+Parse `$ARGUMENTS` for `--member <name>` flag. Capture as `MEMBER` (may be empty). Remove flag from feature description.
 
 `Bash`:
 ```bash
 cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && pwd
 ```
 
-### 0b. Read AGENTS.md
+If outside git repo → abort: "Run inside a project."
 
-`Read`: `<repo-root>/AGENTS.md`
+### 0b. Workspace parent guard
 
-If file missing → stop. Report to user:
+`Bash`:
+```bash
+test -f WORKSPACE.md && echo "WORKSPACE_PARENT" || echo "NOT_WORKSPACE_PARENT"
+test -f AGENTS.md && echo "HAS_AGENTS" || echo "NO_AGENTS"
+```
+
+If `WORKSPACE_PARENT` and `NO_AGENTS` → abort:
+> Currently at workspace parent (multi-repo). `/madd-ship` operates per-repo.
+> cd into a child repo first:
+> `<list child repos from find . -mindepth 2 -maxdepth 2 -name .git -type d>`
+
+### 0c. Scope resolution (monorepo)
+
+If `MEMBER` set:
+- Try `cd packages/$MEMBER`, then `cd apps/$MEMBER`, then `find . -maxdepth 3 -type d -name "$MEMBER" | head -1`
+- If found → cd in
+- If not → abort with list of detected members
+
+If `MEMBER` empty AND CWD has `AGENTS.md` AND a parent dir up to 3 levels also has `AGENTS.md` → **monorepo member detected**. Load both.
+
+If `MEMBER` empty AND only parent has `AGENTS.md` (CWD doesn't) → **at monorepo root or wrong dir**. `AskUserQuestion`:
+- "Run at root scope (whole monorepo)"
+- "Pick member: <list from find . -maxdepth 3 -name AGENTS.md | grep -v ^./AGENTS.md>"
+- "Abort"
+
+### 0d. Read AGENTS.md(s)
+
+`Read`: `<scope>/AGENTS.md`. If monorepo member detected, also `Read` root `AGENTS.md`.
+
+If primary AGENTS.md missing → stop:
 > AGENTS.md not found. Run `/madd-init` first, then re-run `/madd-ship`.
 
-### 0c. Extract key facts
+### 0e. Extract & merge key facts (inheritance)
 
-Parse AGENTS.md sections. Store in working memory:
-- `PACKAGE_MANAGER` (from Stack table)
-- `TEST_CMD`, `BUILD_CMD`, `DEV_CMD`, `DEPLOY_CMD`, `TYPECHECK_CMD`, `LINT_CMD` (from Key commands)
-- `FF_POLICY`, `COMMENT_STYLE`, `ERROR_POLICY` (from Conventions)
+Parse AGENTS.md sections into working memory:
+- `PACKAGE_MANAGER`, `TEST_CMD`, `BUILD_CMD`, `DEV_CMD`, `DEPLOY_CMD`, `TYPECHECK_CMD`, `LINT_CMD`
+- `FF_POLICY`, `COMMENT_STYLE`, `ERROR_POLICY`
 - `FRAMEWORK`, `LANGUAGE`, `TEST_RUNNER`
 
-If any field missing → ask user to fill or run `/madd-init` to regenerate.
+**If monorepo member with inheritance:**
+- Member AGENTS.md starts with `## Inherits from` line
+- Load root AGENTS.md fields first
+- Overlay member fields on top (member wins for any field it defines)
+- Skip silently if member has no overrides for a field (use root value)
 
-### 0d. Detect package manager (override AGENTS.md if drift)
+If any required field still missing after merge → ask user to fill or run `/madd-init` to regenerate.
+
+### 0f. Detect package manager (override AGENTS.md if drift)
 
 `Bash`:
 ```bash
@@ -53,7 +90,7 @@ for f in pnpm-lock.yaml yarn.lock bun.lockb package-lock.json; do test -f $f && 
 
 If detected PM ≠ AGENTS.md `PACKAGE_MANAGER` → warn user, ask which to trust (default: lockfile wins).
 
-### 0e. Determine work size
+### 0g. Determine work size
 
 `AskUserQuestion`:
 - question: "What size is this change?"

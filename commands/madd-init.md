@@ -1,9 +1,10 @@
 ---
-description: "Initialize AGENTS.md + WORKLOG.md for project. Detects stack, asks user, writes files. Required before /madd-ship."
-argument-hint: "[new|existing]"
-version: "2.1.0"
+description: "Initialize AGENTS.md + WORKLOG.md for project. Detects stack + shape (single repo / monorepo / multi-repo workspace), asks user, writes files. Required before /madd-ship."
+argument-hint: "[new|existing] [--member <pkg>] [--all-members]"
+version: "2.2.0"
 changelog: |
-  2.1.0 — Dogfood patches: parallel-call instruction, find-not-glob, wrangler.json detection, merge-mode gap detection + stale-ref scan + redundant-workflow strip, pnpm ls fallback for dev-dep tools
+  2.2.0 — Workspace + monorepo support: classify shape (single/mono/multi-repo), per-package AGENTS.md mode, root index for workspaces
+  2.1.0 — Dogfood patches: parallel-call, find-not-glob, wrangler.json, merge gap detection, pnpm ls fallback
   2.0.0 — Operational runbook rewrite
   1.1.0 — Aspirational scaffold
   1.0.0 — Template only
@@ -13,29 +14,239 @@ changelog: |
 
 You are executing the `/madd-init` skill. Follow steps in order. Do not skip detection. Do not write AGENTS.md until user confirms all fields.
 
-Argument received: `$ARGUMENTS` (may be `new`, `existing`, or empty)
+Argument received: `$ARGUMENTS` (may include `new`, `existing`, `--member <name>`, `--all-members`, or empty)
 
 ---
 
 ## Step 1 — Mode resolution
 
-If `$ARGUMENTS` is empty, ask user:
+If `$ARGUMENTS` lacks `new` or `existing`:
 
-Use `AskUserQuestion`:
-- question: "Is this a new project or existing project?"
+`AskUserQuestion`:
+- question: "New project or existing project?"
 - header: "Project type"
 - options:
-  - label: "Existing" — description: "Detect stack from package.json / lockfiles / source"
-  - label: "New" — description: "Scaffold from scratch via questionnaire"
+  - "Existing" — Detect stack from manifests
+  - "New" — Scaffold from scratch via questionnaire
 
-Store answer as `MODE`.
+Store as `MODE`.
 
 ---
 
-## Step 2 — Pre-flight check
+## Step 1.5 — Workspace shape classification
 
-Run via `Bash`. Use guard pattern so missing files don't exit 1:
+**Critical:** Determine if CWD is a single repo, monorepo, or multi-repo workspace BEFORE proceeding. Misclassification produces wrong AGENTS.md structure.
 
+### 1.5a. Detection bash (separate calls, not chained)
+
+`Bash` 1 — parent git repo check:
+```bash
+TOP=$(git rev-parse --show-toplevel 2>/dev/null)
+CWD=$(pwd)
+if [ "$TOP" = "$CWD" ]; then echo "PARENT_GIT: yes"
+elif [ -n "$TOP" ]; then echo "PARENT_GIT: inside-repo at $TOP"
+else echo "PARENT_GIT: no"
+fi
+```
+
+`Bash` 2 — sibling git repos:
+```bash
+find . -mindepth 2 -maxdepth 2 -name .git -type d 2>/dev/null | sed 's|/.git$||' | sort
+```
+
+`Bash` 3 — workspace markers at root:
+```bash
+for f in pnpm-workspace.yaml turbo.json nx.json lerna.json go.work; do
+  test -f "$f" && echo "MARKER: $f"
+done
+test -f package.json && jq -e '.workspaces' package.json >/dev/null 2>&1 && echo "MARKER: package.json (workspaces field)"
+test -f Cargo.toml && grep -q '^\[workspace\]' Cargo.toml && echo "MARKER: Cargo.toml [workspace]"
+test -f pyproject.toml && grep -qE '\[tool\.(uv|hatch|rye)\.workspace\]' pyproject.toml && echo "MARKER: pyproject.toml workspace"
+```
+
+### 1.5b. Classify
+
+| PARENT_GIT | MARKER present | CHILD repos > 0 | → `SHAPE` |
+|------------|----------------|-----------------|-----------|
+| yes        | yes            | (any)           | `MONOREPO` |
+| yes        | no             | 0               | `SINGLE` |
+| yes        | no             | >0              | `SINGLE` (children are submodules; warn) |
+| no         | (any)          | >1              | `WORKSPACE` |
+| no         | (any)          | 0-1             | `LOOSE` (just a folder) |
+| inside-repo | (any)         | (any)           | `INSIDE` (CWD is within a larger repo) |
+
+### 1.5c. Branch per shape
+
+**SINGLE** → continue to Step 2 (current single-repo flow).
+
+**MONOREPO** → Step 1.6.
+
+**WORKSPACE** → Step 1.7.
+
+**LOOSE** → Report to user:
+> Empty/loose folder. Suggest:
+>   - `/madd-vibe` for new prototype
+>   - Or cd into an existing repo first
+
+Then exit.
+
+**INSIDE** → Report to user:
+> Currently inside larger repo at `<TOP>`. Suggest:
+>   - cd to `<TOP>` and re-run for root-level init
+>   - Or run with `--member <current-subdir>` if monorepo member init intended
+
+Ask via `AskUserQuestion`: continue here as SINGLE, or abort.
+
+---
+
+## Step 1.6 — Monorepo flow
+
+### 1.6a. Enumerate members
+
+Parse the workspace marker to list members.
+
+**pnpm-workspace.yaml:**
+```bash
+cat pnpm-workspace.yaml | grep -E "^\s*-" | sed 's/[- "'\'']//g'
+```
+
+**package.json `workspaces`:**
+```bash
+jq -r '.workspaces[]? // .workspaces.packages[]?' package.json 2>/dev/null
+```
+
+**turbo.json / nx.json:** Usually rely on `package.json workspaces` — fall through to that.
+
+**lerna.json:**
+```bash
+jq -r '.packages[]?' lerna.json 2>/dev/null
+```
+
+**go.work:**
+```bash
+grep -E '^\s*use\s+' go.work | sed 's/use\s*//; s/[()]//g' | tr -s ' ' '\n' | grep -v '^$'
+```
+
+**Cargo.toml [workspace]:**
+```bash
+sed -n '/^\[workspace\]/,/^\[/p' Cargo.toml | grep -E '^\s*members\s*=' | tr -d '[]"' | sed 's/.*=//' | tr ',' '\n'
+```
+
+Expand globs (e.g. `packages/*`) via `find`:
+```bash
+find packages -maxdepth 1 -mindepth 1 -type d 2>/dev/null
+find apps -maxdepth 1 -mindepth 1 -type d 2>/dev/null
+```
+
+Build `MEMBERS` array. Print to user.
+
+### 1.6b. Choose AGENTS.md strategy
+
+`AskUserQuestion`:
+- question: "Monorepo with N members. AGENTS.md strategy?"
+- header: "Mono strategy"
+- options:
+  - "Root only" — single AGENTS.md at root; per-package details inline
+  - "Per-package" — AGENTS.md per member; root has index only
+  - "Hybrid" — root for shared (stack, conventions); per-package for overrides
+
+Store as `MONO_STRATEGY`.
+
+### 1.6c. Member selection (per-package / hybrid)
+
+If `--all-members` in args: select all.
+Else `AskUserQuestion`:
+- question: "Which members to init AGENTS.md?"
+- header: "Members"
+- options: each detected member (max 4 per question, batch if needed)
+- multiSelect: true
+
+Store as `SELECTED_MEMBERS`.
+
+### 1.6d. Loop Step 2-7 per scope
+
+For `MONO_STRATEGY = root only`:
+- Run Steps 2-7 once at root
+- AGENTS.md gets "Members" section listing each
+
+For `MONO_STRATEGY = per-package`:
+- For each selected member: cd in, run Steps 2-7, write `<member>/AGENTS.md`
+- Write minimal `<root>/AGENTS.md` index pointing to each member
+
+For `MONO_STRATEGY = hybrid`:
+- Run Steps 2-7 at root (shared stack/conventions) → root `AGENTS.md`
+- For each selected member: run reduced Steps (only ask overrides) → `<member>/AGENTS.md` with `## Inherits from\n../AGENTS.md`
+
+---
+
+## Step 1.7 — Multi-repo workspace flow
+
+### 1.7a. List sibling repos
+
+From `Bash` 2 output above — print to user with detected state:
+
+```bash
+for repo in <each sibling>; do
+  test -f "$repo/AGENTS.md" && echo "✓ $repo (has AGENTS.md)" || echo "✗ $repo (no AGENTS.md)"
+done
+```
+
+### 1.7b. Choose strategy
+
+`AskUserQuestion`:
+- question: "Multi-repo workspace. Init strategy?"
+- header: "Workspace mode"
+- options:
+  - "Per-repo (pick which)" — choose subset; run `madd-init` inside each
+  - "All repos" — auto-loop all (skip those with existing AGENTS.md unless overwrite)
+  - "Just the workspace index" — write parent-level `WORKSPACE.md` listing repos; no per-repo AGENTS.md
+  - "Cancel — I'll cd into a repo myself"
+
+### 1.7c. Per-repo loop
+
+For each chosen repo:
+```bash
+cd "$repo"
+# Run Steps 2-9 (full single-repo flow)
+cd ..
+```
+
+### 1.7d. Write WORKSPACE.md at parent
+
+Always (regardless of per-repo choice) offer to write parent-level index via `AskUserQuestion`.
+
+`Write` to `./WORKSPACE.md`:
+```markdown
+# Workspace — {parent-dir-name}
+
+Multi-repo workspace. Each subdirectory is an independent git repo. Generated by `/madd-init` v2.2.0 on {ISO_DATE}.
+
+## Repos
+
+| Repo | Stack | AGENTS.md | Notes |
+|------|-------|-----------|-------|
+| [{repo-1}](./{repo-1}/) | {detected stack} | ✓ | {one-line desc if user provides} |
+| [{repo-2}](./{repo-2}/) | {detected stack} | ✓ | ... |
+| [{repo-3}](./{repo-3}/) | {detected stack} | ✗ | not initialized |
+
+## MADD scope
+
+MADD skills (`/madd-ship`, `/madd-debug`, etc.) operate per-repo. cd into the target repo before invoking.
+
+This WORKSPACE.md is an index only — does not participate in `/madd-ship` Phase 0 lookups.
+
+## Repo onboarding
+
+For each repo: `cd <repo> && /madd-init existing` (if not already done).
+```
+
+---
+
+## Step 2 — Pre-flight check (single repo / per-member)
+
+This step assumes you are in a single repo's working dir (set by Step 1.5c branch or by Step 1.6d / 1.7c loop).
+
+`Bash`:
 ```bash
 cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && pwd
 echo "---"
@@ -52,20 +263,15 @@ find . -maxdepth 1 -type f \( \
 ```
 
 Outcomes:
-- **AGENTS.md EXISTS** → `AskUserQuestion`:
-  - "Overwrite" — back up to `AGENTS.md.bak.<timestamp>` then regenerate
-  - "Abort" — stop, report "AGENTS.md exists; abort"
-  - "Merge" — read existing, treat as detection input, run merge-mode gap detection (Step 4b)
-- **Not in a git repo** → warn user; ask continue anyway or run `git init` first
-- **No manifest files** → likely empty repo; force `MODE = new`
+- **AGENTS.md EXISTS** → `AskUserQuestion`: Overwrite (with backup) / Abort / Merge
+- **Not in git repo** → warn user; ask continue or `git init` first
+- **No manifest files** → likely empty; force `MODE = new`
 
 ---
 
 ## Step 3 — Stack detection (existing mode only)
 
-If `MODE = existing`, run detections **as separate parallel Bash tool calls** (one tool call per command — DO NOT chain with `&&`; chained commands stop on first non-zero exit).
-
-For each command below, make a separate `Bash` invocation.
+Run detections **as separate parallel Bash tool calls** — DO NOT chain with `&&` (chained commands stop on first non-zero exit).
 
 **Detect package manager (Node/JS):**
 ```bash
@@ -74,7 +280,8 @@ test -f package.json && jq -r '.packageManager // empty' package.json 2>/dev/nul
 ```bash
 for f in pnpm-lock.yaml yarn.lock bun.lockb package-lock.json; do test -f "$f" && echo "$f"; done
 ```
-Priority: `packageManager` field → pnpm → yarn → bun → npm. If multiple lockfiles, warn user and `AskUserQuestion` to pick.
+
+Priority: `packageManager` field → pnpm → yarn → bun → npm.
 
 **Detect language / runtime:**
 ```bash
@@ -113,7 +320,7 @@ test -f Cargo.toml && echo "cargo test (built-in)"
 test -f package.json && jq -r '.scripts // {} | to_entries | .[] | "\(.key): \(.value)"' package.json 2>/dev/null
 ```
 
-**Detect deployment** — use `find`, NOT shell globs (zsh `nomatch` is not suppressed by `2>/dev/null`):
+**Detect deployment** — use `find`, NOT shell globs:
 ```bash
 find . -maxdepth 2 -type f \( \
   -name 'vercel.json' -o -name 'netlify.toml' -o \
@@ -139,77 +346,59 @@ find . -maxdepth 2 -type d \
 git log --oneline -20 2>/dev/null | awk '{print $2}' | sort -u | head -10
 ```
 
-Synthesize detection results. Build a draft `STACK` object. Show user.
+Synthesize `STACK`.
 
 ---
 
 ## Step 4 — Confirm / fill stack
 
-### 4a. Detection presentation
+### 4a. Presentation
 
-Present detected stack as a list. For each field: confirmed value OR "not detected".
+Show detected stack as list — confirmed value or "not detected" per field.
 
-### 4b. Merge-mode gap detection (existing mode with merge)
+### 4b. Merge-mode gap detection
 
-If user picked **Merge** in Step 2, BEFORE asking questions, run a gap scan against the existing AGENTS.md:
+If user picked **Merge** in Step 2, before asking questions:
 
-`Read` existing AGENTS.md. Check for:
+`Read` existing AGENTS.md. Check:
 
-1. **Stale skill references** — search for old skill names:
+1. **Stale skill refs:**
    ```bash
-   grep -nE '/(ship|init|learn|debug|review|secure|vibe|update)\b(?!/madd-)' AGENTS.md 2>/dev/null
    grep -nE '\b/ship\b' AGENTS.md 2>/dev/null
    ```
-   If hits → flag for auto-fix: rename `/ship` → `/madd-ship`, etc.
+   If hits → flag for auto-fix `/ship` → `/madd-ship`.
 
-2. **Embedded workflow doc** — check if AGENTS.md contains full Phase 1-8 inline (redundant with `/madd-ship` runbook):
+2. **Embedded workflow doc:**
    ```bash
    grep -cE '^### Phase [0-9]' AGENTS.md
    ```
    If count ≥ 3 → flag for auto-strip; replace with link to `/madd-ship`.
 
-3. **Missing conventions section** — check for required fields:
+3. **Missing conventions:**
    ```bash
-   grep -qE 'Feature flags|FF_POLICY' AGENTS.md || echo "MISSING: feature-flags"
+   grep -qE 'Feature flags|FF_POLICY' AGENTS.md || echo "MISSING: flags"
    grep -qE 'Comment|COMMENT_STYLE' AGENTS.md || echo "MISSING: comments"
    grep -qE 'Error handling|ERROR_POLICY' AGENTS.md || echo "MISSING: errors"
    ```
-   Only ask user about MISSING fields.
 
-4. **Missing stack rows** — compare detected vs existing Stack table:
-   ```bash
-   grep -E '^\| (Test runner|Runtime|Package manager) \|' AGENTS.md
-   ```
-   Add rows for any detected field not in existing table.
+4. **Missing stack rows:** compare detected vs existing Stack table.
 
-### 4c. Ask user (only missing/changed)
+### 4c. Ask user
 
-Use `AskUserQuestion` (batch up to 4):
+For NEW: ask all 8 fields.
+For MERGE: ask only gaps from 4b.
+For MONOREPO hybrid + per-member call: ask only override fields (not shared ones already in root).
 
-For NEW mode: ask all.
-For MERGE mode: ask only flagged gaps from 4b.
-
-**Q1 — Framework:** options: detected, "Other"
-**Q2 — Language:** options: detected, "Other"
-**Q3 — Package manager** (Node): detected, alternates
-**Q4 — Test runner:** detected, "None yet"
-**Q5 — Deployment:** Vercel / Netlify / Cloudflare / Docker / AWS / Fly / Render / Other
-**Q6 — Feature flags:** "No, direct change" (default) / "Yes, opt-in only" / "Yes, always"
-**Q7 — Comment style:** "WHY only" (default) / "When unclear" / "Always document public surface"
-**Q8 — Error handling:** "Boundaries only" (default) / "Defensive"
-
-Store as `STACK`.
+(Q1-Q8 unchanged from v2.1.0)
 
 ---
 
 ## Step 5 — Validate stack tools
 
-For each detected tool, run actual existence check via `Bash`.
+Two-tier check.
 
-Use a two-tier check: global PATH first, then package-manager-local fallback for Node projects.
-
+Global PATH:
 ```bash
-# Global PATH check
 for tool in node pnpm yarn npm bun python3 go cargo ruby php; do
   if command -v "$tool" >/dev/null 2>&1; then
     echo "GLOBAL: $tool $($tool --version 2>&1 | head -1)"
@@ -217,53 +406,99 @@ for tool in node pnpm yarn npm bun python3 go cargo ruby php; do
 done
 ```
 
-For tools detected as devDependencies but not in global PATH (e.g., `wrangler`, `vitest`, `playwright`):
+DevDep fallback (Node):
 ```bash
-# Node devDep tools — verify via pnpm ls
 test -f package.json && for tool in wrangler vitest playwright tsx; do
   pnpm ls "$tool" --depth=0 2>/dev/null | grep -q "$tool" && echo "DEVDEP: $tool (via pnpm)"
 done
 ```
 
-If any required tool missing in both global AND devDeps: report to user, ask whether to continue, abort, or accept an alternate command path.
-
 ---
 
 ## Step 6 — Derive key commands
 
-Build commands table from STACK + detected scripts:
+Build commands table from STACK + scripts.
 
 | Purpose | Command |
 |---------|---------|
-| Dev server | `<pm> run dev` or detected `dev` script |
+| Dev server | `<pm> run dev` or detected script |
 | Build | `<pm> run build` |
-| Test | `<pm> test` or detected; for Python `pytest`, Go `go test ./...`, Rust `cargo test` |
-| Type check | `<pm> run typecheck` if present, else `tsc --noEmit` for TS |
-| Lint | `<pm> run lint` if present |
-| Deploy | extracted from deployment platform (e.g. `pnpm deploy`, `vercel`, `wrangler deploy`) |
+| Test | `<pm> test`, `pytest`, `go test ./...`, `cargo test` |
+| Type check | `<pm> run typecheck` or `tsc --noEmit` |
+| Lint | `<pm> run lint` |
+| Deploy | extracted from platform |
 
-If a command isn't found in scripts, `AskUserQuestion` for the canonical one.
+If missing: `AskUserQuestion`.
 
 ---
 
 ## Step 7 — Write AGENTS.md
 
-Construct AGENTS.md content (template below), substituting STACK values.
+### 7a. Single repo / per-member full
 
-For MERGE mode: apply auto-fixes from 4b:
-- Rename stale skill references
-- Strip embedded Phase 1-8 section, replace with link to `/madd-ship`
-- Add missing rows to Stack table
-- Append conventions section
+Use template below. Substitute STACK values.
 
-Then `Write` the merged content to `<repo-root>/AGENTS.md`. Always preserve user-added project-specific sections (e.g., "Project metadata", custom workflows) — do NOT silently drop them.
+For MERGE: apply 4b auto-fixes (rename refs, strip workflow, add missing rows, append conventions). Preserve user-added sections.
 
-**Template:**
+`Write` to `<scope>/AGENTS.md`.
+
+### 7b. Monorepo root index (when `MONO_STRATEGY = per-package`)
+
+Write minimal root AGENTS.md:
+
+```markdown
+# AGENTS.md — {monorepo-name}
+
+Monorepo root. Per-package AGENTS.md in each member dir.
+
+## Members
+
+| Member | Path | Stack |
+|--------|------|-------|
+| {name-1} | [./packages/{name-1}/AGENTS.md](./packages/{name-1}/AGENTS.md) | {framework} |
+| {name-2} | [./apps/{name-2}/AGENTS.md](./apps/{name-2}/AGENTS.md) | {framework} |
+
+## Shared
+
+- Package manager: {pm}
+- Monorepo tool: {turbo|nx|lerna|pnpm-workspace|none}
+- Root commands:
+  \`\`\`bash
+  {pm} install
+  {pm} -r build   # or turbo run build / nx run-many
+  \`\`\`
+
+## MADD scope
+
+Use `/madd-ship --member <name>` to scope ship to a member. Without `--member`, ship operates at root.
+```
+
+### 7c. Monorepo hybrid root + per-member
+
+Root AGENTS.md gets full template (stack, conventions, commands shared across monorepo). Each member AGENTS.md gets:
+
+```markdown
+# AGENTS.md — {member-name}
+
+Inherits from [`../AGENTS.md`](../AGENTS.md) (or `../../AGENTS.md`). Below = overrides only.
+
+## Overrides
+
+| Field | Override | Reason |
+|-------|----------|--------|
+| ... | ... | ... |
+
+## Member-specific
+
+- ...
+```
+
+### 7d. Full template (single / per-member full / monorepo root-only)
 
 ```markdown
 # AGENTS.md — {PROJECT_NAME}
 
-Self-onboarding guide for engineers and AI agents. Maintained by `/madd-init` v2.1.0. Updated {ISO_DATE}.
+Self-onboarding guide for engineers and AI agents. Maintained by `/madd-init` v2.2.0. Updated {ISO_DATE}.
 
 ## Stack
 
@@ -333,57 +568,53 @@ Other MADD skills:
 ## Project metadata
 
 - Initialized: {ISO_DATE}
+- Shape: {SHAPE}  ({single|monorepo-root|monorepo-member|workspace-repo})
 - Mode: {MODE}
-- MADD version: 1.7.0
+- MADD version: 1.8.0
 ```
 
 ---
 
 ## Step 8 — Write WORKLOG.md (if missing)
 
-Check existence via `Bash`:
+Per-scope. Single repo → one WORKLOG.md. Monorepo per-package mode → WORKLOG.md per member (where feature work happens). Workspace → per-repo, same as single.
+
+Check:
 ```bash
 test -f WORKLOG.md && echo EXISTS || echo MISSING
 ```
 
-If MISSING, `Write` to `<repo-root>/WORKLOG.md`:
-
-```markdown
-# WORKLOG.md
-
-Decision log for non-obvious choices. One entry per `/madd-ship` feature. Append-only.
-
-## Entry format
-
-\`\`\`
-## <feature-name> — <ISO-date>
-- <decision and why>
-- <gotcha and resolution>
-- <constraint discovered>
-\`\`\`
-
-If nothing non-obvious: still write an entry with `- No non-obvious decisions; straightforward impl per spec`.
-```
-
-If EXISTS, leave untouched.
+If MISSING, `Write` standard WORKLOG.md template (unchanged from v2.1.0).
 
 ---
 
 ## Step 9 — Summary & next step
 
-Report to user:
+Report per shape:
 
+**Single repo:**
 ```
-✓ AGENTS.md written ({line-count} lines)
-✓ WORKLOG.md {created|preserved}
-✓ Stack validated: {tools-checked}
-{if backup}  ✓ Backup: AGENTS.md.bak.{timestamp}
-
-Next:
-  /madd-ship <your first feature description>
+✓ AGENTS.md written
+✓ WORKLOG.md created/preserved
+Next: /madd-ship <feature>
 ```
 
-If any tool validation failed earlier, repeat warning in summary.
+**Monorepo:**
+```
+✓ Root AGENTS.md written
+✓ N member AGENTS.md written: <list>
+✓ WORKLOG.md(s) created
+Next: cd <member> && /madd-ship <feature>
+      or /madd-ship --member <name> <feature> from root
+```
+
+**Workspace:**
+```
+✓ WORKSPACE.md written at parent
+✓ N repos initialized: <list>
+✓ Skipped existing: <list>
+Next: cd <repo> && /madd-ship <feature>
+```
 
 ---
 
@@ -391,22 +622,23 @@ If any tool validation failed earlier, repeat warning in summary.
 
 | Symptom | Cause | Recovery |
 |---------|-------|----------|
-| `jq: command not found` | jq missing | Fall back to `grep`/`sed` parsing; warn user to install jq for cleaner output |
-| `git rev-parse` fails | Not in git repo | Use `pwd`; warn user; offer `git init` |
-| zsh `no matches found` | Glob expansion with no hits | Use `find -name` not glob+`ls` |
-| `AskUserQuestion` declined | User cancelled | Abort cleanly; do not write partial AGENTS.md |
-| `Write` permission denied | Read-only fs | Report path; suggest alternate location |
-| Multiple frameworks detected | Monorepo | Ask user which workspace; consider running `/madd-init` per workspace |
-| `command -v wrangler` empty but tool in devDeps | Tool only via package manager | Use Step 5 tier-2 check (`pnpm ls`) |
-| Chained `&&` exits early | One detect command returned non-zero | Run each as separate Bash tool call |
+| Chained `&&` exits early | One detect returned non-zero | Run each as separate Bash call |
+| zsh `no matches found` | Glob with no hits | Use `find -name` |
+| `command -v X` empty + X in devDeps | Tool via pnpm only | Step 5 tier-2 check |
+| Monorepo member glob unexpanded | Marker uses `packages/*` | Expand via `find packages -maxdepth 1 -type d` |
+| Workspace has nested monorepo | Mixed shape | Treat outer as WORKSPACE; cd into the monorepo child and re-run for MONOREPO handling |
+| `MEMBERS` count = 0 in monorepo | Marker present but no resolved packages | Warn user; fall through to root-only mode |
+| User picks per-package but no member responses | Empty selection | Re-ask or default to all |
+| `INSIDE` shape | CWD nested in larger repo | Warn; user picks: continue here as SINGLE / abort / cd to root |
 
 ---
 
 ## Caveats
 
-- This skill makes **real** tool calls. Do not simulate detection — run the Bash commands.
+- This skill makes **real** tool calls. Do not simulate detection — run Bash.
 - Detection commands MUST be run as separate Bash invocations (parallel). Chaining with `&&` aborts on first non-zero exit.
-- Do not assume detection output; show it to user via `AskUserQuestion` for confirmation.
-- Do not write AGENTS.md mid-flow; only at Step 7 with full STACK gathered.
-- Backup before overwrite — never destroy existing AGENTS.md without user OK.
+- Step 1.5 SHAPE classification is mandatory — wrong shape → wrong AGENTS.md structure → all downstream MADD skills misbehave.
+- For WORKSPACE: never write AGENTS.md at parent (parent is not a project). Only WORKSPACE.md index.
+- For MONOREPO hybrid: per-member AGENTS.md MUST start with `## Inherits from` so `/madd-ship` Phase 0 knows to read root too.
 - In merge mode, preserve user-added sections — do not silently drop them.
+- Backup before overwrite — never destroy existing AGENTS.md without user OK.

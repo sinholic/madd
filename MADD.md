@@ -4,7 +4,7 @@ Framework for SDD+TDD end-to-end feature delivery.
 
 ---
 
-## Current version: 1.7.0
+## Current version: 1.8.0
 
 Released: 2026-06-01
 
@@ -14,8 +14,8 @@ Released: 2026-06-01
 
 | Skill | Version | Status | Purpose |
 |-------|---------|--------|---------|
-| `madd-init` | 2.1.0 | Active runbook | Detection + scaffold; dogfood-patched (parallel calls, find-not-glob, wrangler.json, merge gap detection, pnpm ls fallback) |
-| `madd-ship` | 2.0.0 | Active runbook | 8-phase delivery; real gates, WORKLOG.md Edit, PM detect, auto-handoff, Quickfix/Hotfix modes |
+| `madd-init` | 2.2.0 | Active runbook | Detection + scaffold; workspace shape classification (single/mono/multi-repo), monorepo per-pkg + hybrid modes, WORKSPACE.md index |
+| `madd-ship` | 2.1.0 | Active runbook | 8-phase delivery; --member flag, root+member AGENTS.md inheritance merge, workspace parent guard |
 | `madd-learn` | 2.0.0 | Active runbook | Post-ship capture; correct MCP names, availability cascade, file fallback |
 | `madd-debug` | 1.0.0 | Active runbook | Systematic debug; scientific method, persistent `.madd-debug.md` state |
 | `madd-review` | 1.0.0 | Active runbook | Source review; severity-classified REVIEW.md, optional auto-fix |
@@ -27,6 +27,35 @@ Released: 2026-06-01
 ---
 
 ## Version history
+
+### 1.8.0 (2026-06-01) — Workspace + monorepo support
+
+**Shape detection added:**
+- New Step 1.5 in `madd-init` classifies repo shape:
+  - `SINGLE` — one git repo, no workspace marker → current flow
+  - `MONOREPO` — one git repo + workspace marker (pnpm-workspace / turbo / nx / lerna / go.work / Cargo `[workspace]` / package.json `workspaces`)
+  - `WORKSPACE` — parent dir not a repo, ≥2 sibling repos with own `.git`
+  - `LOOSE` — folder with nothing → suggest `/madd-vibe`
+  - `INSIDE` — CWD nested in larger repo → warn + ask
+
+**Monorepo flow:**
+- 3 strategies: `root only` / `per-package` / `hybrid` (root shared + per-pkg overrides)
+- Member enumeration parses each workspace marker (pnpm yaml, package.json workspaces, go.work `use` directives, Cargo `members`, lerna packages, glob expansion via `find`)
+- Per-package AGENTS.md inherits from root via `## Inherits from ../AGENTS.md`
+- Root-only mode: minimal index AGENTS.md with member table
+
+**Workspace flow:**
+- Lists sibling repos, shows AGENTS.md presence per-repo
+- 4 strategies: per-repo pick / all-repos auto / WORKSPACE.md index only / cancel
+- Per-repo loop runs full single-repo flow inside each
+- Writes parent-level `WORKSPACE.md` index (markdown table of repos + stacks)
+
+**`/madd-ship` v2.1.0 monorepo/workspace awareness:**
+- `--member <name>` flag for explicit scoping
+- Phase 0b: workspace parent guard — refuses to run at WORKSPACE.md root
+- Phase 0c: scope resolution — detects monorepo member from `## Inherits from`, or asks if at root without --member
+- Phase 0e: inheritance merge — root fields loaded first, member fields overlay
+- All downstream phases unchanged (use merged STACK as before)
 
 ### 1.7.0 (2026-06-01) — Dogfood pass + new skills
 
