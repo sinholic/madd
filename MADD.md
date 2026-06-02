@@ -4,9 +4,9 @@ Framework for SDD+TDD end-to-end feature delivery.
 
 ---
 
-## Current version: 1.8.0
+## Current version: 1.9.0
 
-Released: 2026-06-01
+Released: 2026-06-02
 
 ---
 
@@ -15,7 +15,7 @@ Released: 2026-06-01
 | Skill | Version | Status | Purpose |
 |-------|---------|--------|---------|
 | `madd-init` | 2.2.0 | Active runbook | Detection + scaffold; workspace shape classification (single/mono/multi-repo), monorepo per-pkg + hybrid modes, WORKSPACE.md index |
-| `madd-ship` | 2.1.0 | Active runbook | 8-phase delivery; --member flag, root+member AGENTS.md inheritance merge, workspace parent guard |
+| `madd-ship` | 2.2.0 | Active runbook | 8-phase delivery; branch hygiene (auto-create feature branch from latest base); platform-aware PR/MR (GitHub `gh` + GitLab `glab`); `--base`/`--no-new-branch` flags |
 | `madd-learn` | 2.0.0 | Active runbook | Post-ship capture; correct MCP names, availability cascade, file fallback |
 | `madd-debug` | 1.0.0 | Active runbook | Systematic debug; scientific method, persistent `.madd-debug.md` state |
 | `madd-review` | 1.0.0 | Active runbook | Source review; severity-classified REVIEW.md, optional auto-fix |
@@ -27,6 +27,30 @@ Released: 2026-06-01
 ---
 
 ## Version history
+
+### 1.9.0 (2026-06-02) — Branch hygiene + platform-aware PR/MR
+
+**`madd-ship` v2.2.0:**
+- New **Step 0h** — branch hygiene before Phase 1:
+  - Detect base branch (priority: `--base` arg → AGENTS.md `BASE_BRANCH` → `origin/HEAD` → `main` → `master` → ask)
+  - Stash-or-commit gate if working tree dirty
+  - `git fetch + checkout BASE + pull --ff-only` to sync latest
+  - Derive feature branch name from feature description (slugify + prefix from convention)
+  - `git checkout -b $FEATURE_BRANCH` from latest base
+- New flags: `--base <branch>` (override default), `--no-new-branch` (skip Step 0h if already on feature branch)
+- **Phase 6 platform detection** — classify remote URL: GITHUB / GITLAB / BITBUCKET / other
+- **Phase 6 PR/MR creation:**
+  - GitHub → `gh pr create --draft --base $BASE --head $FEATURE_BRANCH`
+  - GitLab (including self-hosted) → `glab mr create --draft --target-branch $BASE --source-branch $FEATURE_BRANCH`
+  - Bitbucket / other → print URL pattern for manual creation
+- **Phase 8 merge** — platform-dispatched: `gh pr merge` / `glab mr merge` / web UI; then `git checkout $BASE && git pull` to sync local
+
+**New global hook:** `git-branch-guard.sh` (replaces bouchon-specific):
+- Agnostic — uses CWD-based git detection
+- Config priority: `$PWD/.git-branch-guard.json` → `$REPO_ROOT/.git-branch-guard.json` → `~/.config/git-branch-guard.json` → built-in
+- Defaults: protected `main`/`master`/`develop`; allowed prefixes `feat/`/`fix/`/`hotfix/`/`release/`/`chore/`/`docs/`/`refactor/`/`test/`/`ci/`
+- Bouchon protected branches (kejaksaan, v2-imini, zelda-dev) preserved via repo-local override
+- Old `bouchon-branch-guard.sh` kept as backup; settings.json updated
 
 ### 1.8.0 (2026-06-01) — Workspace + monorepo support
 

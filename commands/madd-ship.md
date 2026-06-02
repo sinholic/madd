@@ -1,9 +1,10 @@
 ---
 description: "Drive end-to-end feature delivery: Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production. SDD+TDD in 8 phases. Real tool invocations, not docs."
-argument-hint: "<feature description> [--member <name>]"
-version: "2.1.0"
+argument-hint: "<feature description> [--member <name>] [--base <branch>] [--no-new-branch]"
+version: "2.2.0"
 changelog: |
-  2.1.0 — Monorepo + workspace support: --member flag, root+member AGENTS.md merge in Phase 0, workspace parent refusal
+  2.2.0 — Branch hygiene: pull latest base + create feature branch (Step 0h); platform-aware PR/MR (GitHub gh, GitLab glab); merge targets $BASE; --base + --no-new-branch flags
+  2.1.0 — Monorepo + workspace support
   2.0.0 — Operational runbook rewrite
   1.2.0 — Added madd-learn integration
   1.1.0 — Aspirational auto-validation
@@ -101,6 +102,70 @@ If detected PM ≠ AGENTS.md `PACKAGE_MANAGER` → warn user, ask which to trust
   - "Hotfix" — Skip 1,2,7; deploy after Phase 6 (production bug)
 
 Store as `SHIP_MODE`. If Quickfix or Hotfix: branch behavior at relevant phases below.
+
+### 0h. Branch hygiene — pull base, create feature branch
+
+Parse `$ARGUMENTS` for `--base <branch>` flag. Parse `--no-new-branch` flag (skip this step if user already on feature branch).
+
+If `--no-new-branch` → skip to Phase 1.
+
+**Detect base branch** (priority order):
+1. `--base <branch>` arg if provided
+2. AGENTS.md `BASE_BRANCH` field if present
+3. `git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'` (remote default)
+4. `main` if exists
+5. `master` if exists
+6. Ask user via `AskUserQuestion`
+
+`Bash`:
+```bash
+git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'
+git show-ref --verify --quiet refs/heads/main && echo "main exists"
+git show-ref --verify --quiet refs/heads/master && echo "master exists"
+```
+
+Store as `BASE`.
+
+**Check working tree clean:**
+```bash
+git status --porcelain
+```
+
+If dirty → `AskUserQuestion`:
+- "Stash changes" — `git stash push -m "madd-ship pre-flight"`
+- "Commit first" — abort, user commits manually
+- "Cancel ship"
+
+**Pull latest base:**
+```bash
+git fetch origin "$BASE"
+git checkout "$BASE"
+git pull --ff-only origin "$BASE"
+```
+
+If pull fails (diverged) → abort, ask user to resolve.
+
+**Derive feature branch name** from feature description (`$ARGUMENTS` minus flags):
+- Slugify: lowercase, spaces → `-`, strip non-`[a-z0-9-]`
+- Prefix per AGENTS.md commit convention (default `feat/`)
+- Truncate to 50 chars
+- Example: "add user profile page" → `feat/add-user-profile-page`
+
+`AskUserQuestion`:
+- "Use branch name `<derived>`?"
+- options:
+  - "Yes — create branch"
+  - "Edit name" — ask for custom
+  - "Use existing branch" — list local branches; user picks
+
+**Create feature branch:**
+```bash
+git checkout -b "$FEATURE_BRANCH"
+```
+
+Store `BASE` + `FEATURE_BRANCH` for Phase 6 (PR target).
+
+If user picked "Use existing branch": verify it's not `$BASE` itself.
 
 ---
 
@@ -348,19 +413,61 @@ git diff --quiet || git commit -am "refactor: <feature> — clean up after green
 
 Both must pass. Do not bypass hooks. Do not skip type errors.
 
-### 6b. Push + open draft PR
+### 6b. Push feature branch
 
 `Bash`:
 ```bash
-git push -u origin HEAD
+git push -u origin "$FEATURE_BRANCH"
 ```
 
-Then create draft PR. Detect platform:
+### 6c. Detect platform
+
+`Bash`:
 ```bash
 git remote get-url origin
 ```
 
-If GitHub: `gh pr create --draft --title "feat: <feature>" --body "$(cat <<'EOF'
+Classify by remote URL:
+- contains `github.com` → `GITHUB`
+- contains `gitlab.` (including self-hosted like `gitlab.sprout.co.id`) → `GITLAB`
+- contains `bitbucket.org` → `BITBUCKET`
+- other → ask user via `AskUserQuestion`
+
+Store as `PLATFORM`.
+
+### 6d. Open draft PR / MR — targets `$BASE`
+
+**GITHUB** (`gh pr create`):
+```bash
+gh pr create --draft \
+  --base "$BASE" \
+  --head "$FEATURE_BRANCH" \
+  --title "feat: <feature one-liner>" \
+  --body "$(cat <<'EOF'
+## Summary
+<spec one-liner>
+
+## Acceptance criteria
+- [ ] <criterion 1>
+- [ ] <criterion 2>
+
+## Test plan
+- [ ] All N named tests green
+- [ ] Staging UAT pass (Phase 7)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code) via /madd-ship
+EOF
+)"
+```
+
+**GITLAB** (`glab mr create`):
+```bash
+glab mr create \
+  --draft \
+  --target-branch "$BASE" \
+  --source-branch "$FEATURE_BRANCH" \
+  --title "feat: <feature one-liner>" \
+  --description "$(cat <<'EOF'
 ## Summary
 <spec one-liner>
 
@@ -372,7 +479,18 @@ If GitHub: `gh pr create --draft --title "feat: <feature>" --body "$(cat <<'EOF'
 - [ ] All N named tests green
 - [ ] Staging UAT pass (Phase 7)
 EOF
-)"`
+)"
+```
+
+If `glab` not installed → fall back to printing the MR URL pattern + manual instruction:
+```
+Open MR manually:
+  https://<gitlab-host>/<group>/<project>/-/merge_requests/new?merge_request[source_branch]=$FEATURE_BRANCH&merge_request[target_branch]=$BASE
+```
+
+**BITBUCKET**: Print URL pattern + instruction (no first-class CLI assumed).
+
+Capture returned PR/MR URL. Print to user.
 
 ---
 
@@ -411,13 +529,30 @@ If failed: report which criteria, stop, suggest fixes.
 
 ## Phase 8 — Production
 
-### 8a. Promote PR + deploy
+### 8a. Promote PR/MR + merge to base
 
-`Bash` (GitHub):
+Platform-dispatch based on `PLATFORM` from Phase 6:
+
+**GITHUB:**
 ```bash
-gh pr ready
-# Wait for CI / reviewer if required
-gh pr merge --squash  # or per AGENTS.md merge policy
+gh pr ready  # promotes current branch's PR from draft
+# Wait for CI / reviewer if required by repo settings
+gh pr merge --squash  # or per AGENTS.md merge policy: --merge / --rebase / --squash
+```
+
+**GITLAB:**
+```bash
+glab mr update --ready  # un-draft
+# Wait for pipeline / approval per project settings
+glab mr merge --squash  # or per AGENTS.md merge policy
+```
+
+**BITBUCKET / other:** instruct user to merge via web UI; wait for confirmation before continuing.
+
+After merge, sync local base:
+```bash
+git checkout "$BASE"
+git pull --ff-only origin "$BASE"
 ```
 
 Then deploy:
