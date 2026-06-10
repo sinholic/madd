@@ -4,9 +4,9 @@ Framework for SDD+TDD end-to-end feature delivery. Ships commands, hooks, and sk
 
 ---
 
-## Current version: 2.0.0
+## Current version: 2.0.1
 
-Released: 2026-06-11
+Released: Unreleased (PR #2 open)
 
 ---
 
@@ -16,11 +16,11 @@ Released: 2026-06-11
 
 | Skill | Version | Status | Purpose |
 |-------|---------|--------|---------|
-| `madd-init` | 2.4.0 | Active runbook | Detection + scaffold; workspace shape classification; registers MADD hooks in `.claude/settings.json`; gitignores state files |
-| `madd-ship` | 3.1.0 | Active runbook | 8-phase delivery; persistent `.madd-ship-state.json` for resume + hook enforcement; Step 0j resume protocol; Step 0i.5 file-tree work-type signal; Phase 1a auto-`/madd-recall` |
+| `madd-init` | 2.5.0 | Active runbook | Detection + scaffold; workspace shape classification (1.6/1.7 in `commands/madd-init-shapes/`); registers MADD hooks in `.claude/settings.json`; gitignores state + cache files |
+| `madd-ship` | 3.2.0 | Active runbook | 8-phase delivery; phase bodies in `commands/madd-ship-phases/`; orchestrator loads each phase on demand; persistent state; Step 0j resume protocol; Step 0i.5 file-tree work-type signal; Phase 1a auto-`/madd-recall` |
 | `madd-learn` | 2.0.0 | Active runbook | Post-ship capture; MCP primary, LEARNINGS.md fallback |
-| `madd-recall` | 1.0.0 | **NEW** runbook | Read-side of memory loop; surfaces prior learnings before spec |
-| `madd-status` | 1.0.0 | **NEW** runbook | One-screen digest of ship/debug/learn state |
+| `madd-recall` | 1.1.0 | Active runbook | Read-side of memory loop; cache layer + MCP + LEARNINGS.md grep fallback |
+| `madd-status` | 1.1.0 | Active runbook | One-line digest by default (`--full` for box-drawing) |
 | `madd-checkpoint` | 1.0.0 | **NEW** runbook | Local snapshot of state file + git stash before pivoting |
 | `madd-rollback` | 1.0.0 | **NEW** runbook | Restore from checkpoint; distinct from prod revert |
 | `madd-debug` | 1.0.0 | Active runbook | Systematic debug; scientific method, `.madd-debug.md` state |
@@ -53,6 +53,40 @@ Released: 2026-06-11
 ---
 
 ## Version history
+
+### 2.0.1 (2026-06-11) — Token-efficiency pass
+
+**Theme:** cut baseline runbook load on hot paths without changing behavior. Same artifacts, smarter file layout, smarter defaults.
+
+**Shipped:**
+
+- **`madd-ship` v3.2.0 — phase bodies extracted:**
+  - 8 phase files at `commands/madd-ship-phases/phase-{1-spec, 2-schema, 3-tests-red, 4-impl, 5-green, 6-ci, 7-uat, 8-prod}.md`
+  - Orchestrator drops 975 → 379 lines. Each phase 32-99 lines, `Read`-loaded only when entering that phase.
+  - Worst case (full Standard ship): orchestrator + 5-8 phases ≈ 600 lines spread across calls. Cache-friendly.
+  - Best case (Hotfix or resume from late phase): orchestrator + 1-2 phases ≈ 450 lines.
+- **`madd-init` v2.5.0 — shape sub-runbooks:**
+  - `commands/madd-init-shapes/{monorepo,workspace}.md` extracted from inline Step 1.6 / 1.7
+  - SINGLE-repo path (most common) drops 811 → 681 lines; never loads sub-files.
+  - MONOREPO / WORKSPACE paths read their respective sub-file on demand.
+- **`madd-status` v1.1.0 — default terse:**
+  - Box-drawing digest behind `--full`. Default = one-line `ship: <feat> phase=<N> | debug: ... | worklog: ...`.
+  - Routine status checks drop ~80%.
+- **`madd-recall` v1.1.0 — cache layer:**
+  - `.madd-recall-cache.json` keyed on sha1(`KEYWORDS|LIMIT|MIN_CONF|SOURCE`). Default TTL 1h.
+  - Phase 1 spec-iteration loops within an hour skip MCP + file pass entirely.
+  - Cache sweeps entries > 7 days old on each write. Local-only; gitignored.
+- **`install.sh` v2.1:**
+  - Fetches `commands/madd-ship-phases/` (8 files) and `commands/madd-init-shapes/` (2 files) into matching dirs under `~/.claude/commands/`.
+  - Backwards-compat: missing sub-files fail soft per-file rather than aborting.
+
+**Estimated savings (real ships, RTK active):**
+- Full Standard ship (8 phases): 50-150k → **30-90k tokens** (40% reduction baseline; better with cache hits on recall)
+- `/madd-init` SINGLE: 20-40k → **14-28k** (25-30% reduction)
+- `/madd-status` (per-check): 3-8k → **0.5-1.5k** (~80% reduction)
+- `/madd-recall` cache hit (within TTL): 5-10k → **<1k**
+
+**No functional changes** — same gates, hooks, state writes, and file contracts. Default output for `/madd-status` changed to terse (opt-in `--full` for the v1.0.0 box-drawing digest). Extracted phase/shape sub-files preserve all behavior; only load timing differs.
 
 ### 2.0.0 (2026-06-11) — Control center: hooks, skills, state, recall
 
