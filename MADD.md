@@ -1,32 +1,112 @@
 # MADD — Misua AI Development Driven
 
-Framework for SDD+TDD end-to-end feature delivery.
+Framework for SDD+TDD end-to-end feature delivery. Ships commands, hooks, and skills as a complete `.claude/` control center.
 
 ---
 
-## Current version: 1.9.0
+## Current version: 2.0.0
 
-Released: 2026-06-02
+Released: 2026-06-11
 
 ---
 
-## Skills
+## Skills (commands + hooks + auto-trigger skills)
+
+### Slash commands
 
 | Skill | Version | Status | Purpose |
 |-------|---------|--------|---------|
-| `madd-init` | 2.2.0 | Active runbook | Detection + scaffold; workspace shape classification (single/mono/multi-repo), monorepo per-pkg + hybrid modes, WORKSPACE.md index |
-| `madd-ship` | 2.2.0 | Active runbook | 8-phase delivery; branch hygiene (auto-create feature branch from latest base); platform-aware PR/MR (GitHub `gh` + GitLab `glab`); `--base`/`--no-new-branch` flags |
-| `madd-learn` | 2.0.0 | Active runbook | Post-ship capture; correct MCP names, availability cascade, file fallback |
-| `madd-debug` | 1.0.0 | Active runbook | Systematic debug; scientific method, persistent `.madd-debug.md` state |
-| `madd-review` | 1.0.0 | Active runbook | Source review; severity-classified REVIEW.md, optional auto-fix |
-| `madd-secure` | 1.0.0 | Active runbook | Security audit; secrets, dep CVEs, auth/authz, SECURITY.md |
-| `madd-vibe` | 1.0.0 | Active runbook | Prototype scaffold; skip discipline, graduate to /madd-ship later |
-| `madd-update` | 1.0.0 | Active runbook | Fetcher; git/curl/local source, diff preview, backup before overwrite |
+| `madd-init` | 2.4.0 | Active runbook | Detection + scaffold; workspace shape classification; registers MADD hooks in `.claude/settings.json`; gitignores state files |
+| `madd-ship` | 3.1.0 | Active runbook | 8-phase delivery; persistent `.madd-ship-state.json` for resume + hook enforcement; Step 0j resume protocol; Step 0i.5 file-tree work-type signal; Phase 1a auto-`/madd-recall` |
+| `madd-learn` | 2.0.0 | Active runbook | Post-ship capture; MCP primary, LEARNINGS.md fallback |
+| `madd-recall` | 1.0.0 | **NEW** runbook | Read-side of memory loop; surfaces prior learnings before spec |
+| `madd-status` | 1.0.0 | **NEW** runbook | One-screen digest of ship/debug/learn state |
+| `madd-checkpoint` | 1.0.0 | **NEW** runbook | Local snapshot of state file + git stash before pivoting |
+| `madd-rollback` | 1.0.0 | **NEW** runbook | Restore from checkpoint; distinct from prod revert |
+| `madd-debug` | 1.0.0 | Active runbook | Systematic debug; scientific method, `.madd-debug.md` state |
+| `madd-review` | 1.0.0 | Active runbook | Source review; severity-classified REVIEW.md |
+| `madd-secure` | 1.0.0 | Active runbook | Security audit; SECURITY.md |
+| `madd-vibe` | 1.0.0 | Active runbook | Prototype scaffold; skip discipline |
+| `madd-update` | 1.0.0 | Active runbook | Fetcher; git/curl/local source, diff preview, backups |
+| `madd-design` | 1.0.0 | Active runbook | Frontend design validation |
+| `madd-devops` | 1.0.0 | Active runbook | Infra/CI review |
+| `madd-data` | 1.0.0 | Active runbook | DB migration / pipeline flow |
+| `madd-robot` | 1.0.0 | Active runbook | Embedded/firmware flow |
 | ~~`madd-install`~~ | — | Removed | Circular; replaced by `/madd-update` |
+
+### Hooks (`~/.claude/hooks/`)
+
+| Hook | Event | Version | Purpose |
+|------|-------|---------|---------|
+| `madd-phase-guard.sh` | PreToolUse Bash | 2.0.0 | Reads `.madd-ship-state.json`; blocks `feat:` commits before Phase 3 RED gate confirmed; blocks `git push` when `last_test_exit != 0` |
+| `madd-commit-prefix.sh` | PreToolUse Bash(git commit) | 2.0.0 | Enforces MADD prefix discipline; opt-in via state file or AGENTS.md mention |
+| `madd-no-debug-code.sh` | PreToolUse Edit\|Write | 2.0.0 | Rejects `console.log`/`print(`/`dbg!(`/`debugger;` in non-test source; per-repo opt-out via `.madd-no-debug-code.disabled` |
+
+### Auto-trigger skills (`~/.claude/skills/`)
+
+| Skill | Trigger | Action |
+|-------|---------|--------|
+| `madd-ship-resume` | User opens project with `.madd-ship-state.json` and asks about current work | Runs `/madd-status`; offers resume |
+| `madd-pre-pr-check` | User about to `gh pr create` / `glab mr create` / push feature branch | Runs `/madd-review` + `/madd-secure` on diff |
+| `madd-post-learn` | After successful `gh pr merge` / `glab mr merge` | Prompts `/madd-learn --from-worklog` |
 
 ---
 
 ## Version history
+
+### 2.0.0 (2026-06-11) — Control center: hooks, skills, state, recall
+
+**Theme:** MADD becomes a complete `.claude/` control center — commands + hooks + skills + state — instead of commands-only. Closes 6 gaps surfaced in the v1.9 → v2.0 review.
+
+**Shipped — new artifacts:**
+
+- 3 PreToolUse hooks (`hooks/`):
+  - `madd-phase-guard.sh` — reads `.madd-ship-state.json`; blocks `feat:` commits before RED, blocks push on red tests
+  - `madd-commit-prefix.sh` — enforces `schema:/stub:/test(red):/feat:/refactor:/fix:/Rollback:` per `/madd-ship` Commit prefix discipline table
+  - `madd-no-debug-code.sh` — rejects `console.log`/`print(`/`dbg!(`/`debugger;` in non-test source, with per-repo opt-out
+- 3 auto-trigger skills (`skills/`, Anthropic SKILL.md format):
+  - `madd-ship-resume` — surfaces existing ship on project open
+  - `madd-pre-pr-check` — runs review + security before PR opens
+  - `madd-post-learn` — prompts learn capture after merge
+- 4 new slash commands (`commands/`):
+  - `/madd-recall` — closes roadmap 1.10.0; reads agentmemory MCP smart_search + LEARNINGS.md fallback
+  - `/madd-status` — one-screen digest of all MADD state
+  - `/madd-checkpoint` — snapshot state + working tree before pivots
+  - `/madd-rollback` — restore from checkpoint (distinct from prod revert)
+
+**Shipped — runbook upgrades:**
+
+- `madd-ship` v3.0 → v3.1:
+  - Step 0i.5: file-tree work-type signal via `git diff --name-only` — augments keyword pass; tree wins on conflict
+  - Step 0i.6: precedence merge table (keyword / tree / both / neither)
+  - **Step 0j: state file resume protocol** — reads `.madd-ship-state.json`, offers resume/fresh/checkpoint; auto-flags `--resume` / `--fresh`
+  - Phase 1a.pre: auto-invokes `/madd-recall` before drafting spec; surfaces matched learnings via `AskUserQuestion`
+  - State writes at each phase boundary (1c, 2c, 3c, 4c, 5d, 6a, 6b, 7c, 8b) — hook-readable, resume-capable
+  - Phase 8e: cycle cleanup (archive or delete state file post-ship)
+- `madd-init` v2.3 → v2.4:
+  - Step 8.5b: extended generated `settings.json` to register the 3 MADD hooks (`Bash` + `Edit|Write` matchers, dedupe-on-merge)
+  - Step 8.5c: gitignores `.madd-ship-state.json`, `.madd-ship-state.backup-*.json`, `.madd-pending-sync`, `.madd-learn-captured-*`, `.madd-ship-archive/`, `.madd-debug.md`, `MADD-CHECKPOINTS.md`
+  - Step 9 summary lists the registered hooks
+- `install.sh` v1 → v2:
+  - Extended from 4 commands to 16 (covers `madd-debug`/`madd-review`/`madd-secure`/`madd-vibe`/`madd-design`/`madd-devops`/`madd-data`/`madd-robot` previously missing)
+  - Now installs `hooks/` to `~/.claude/hooks/` with `chmod +x`
+  - Now installs `skills/` to `~/.claude/skills/`
+  - Per-artifact skip + count summary
+
+**Gap analysis (closed by 2.0):**
+
+| # | v1.9 gap | v2.0 resolution |
+|---|----------|----------------|
+| 1 | Phase gates `AskUserQuestion`-only — bypassable | `madd-phase-guard.sh` + state file enforce gates at tool layer |
+| 2 | `/madd-learn` writes; nothing reads | `/madd-recall` + Phase 1a.pre close the loop |
+| 3 | No mid-ship resume | `.madd-ship-state.json` + Step 0j + `/madd-status` / `/madd-checkpoint` / `/madd-rollback` |
+| 4 | Work-type routing keyword-only | Step 0i.5 file-tree signal + 0i.6 precedence |
+| 5 | No `skills/` dir | 3 auto-trigger skills ship in `skills/` |
+| 6 | `install.sh` shipped 4 of 11 commands | Now ships 16 + 3 hooks + 3 skills |
+
+**Verification:**
+
+Hooks unit-tested with smoke fixtures (state-driven block on `feat:` pre-RED, push pre-green; commit-prefix opt-in gate; no-debug-code basename + extension rules). End-to-end on a fresh repo + dogfood on `/Users/sproutoffice/apps/personal/misua-id` pending v2.0.1.
 
 ### 1.9.0 (2026-06-02) — Branch hygiene + platform-aware PR/MR
 
@@ -237,25 +317,31 @@ cp ~/.claude/commands/.backup/madd-ship.md.bak.<timestamp> ~/.claude/commands/ma
 
 ## Roadmap (real, not aspirational)
 
-**1.8.0 — Source publishing:**
-- Push `madd-public` to github.com/sinholic/madd
-- Verify `install.sh` works end-to-end on a fresh machine
-- Set `MADD_SOURCE` default in `~/.claude/MADD.config`
-- `/madd-update --check` workflow live
+**Shipped (1.8.0 – 2.0.0):**
+- ✓ 1.8.0 — Source publishing + install.sh (1.6.0 actually; renumbered)
+- ✓ 1.9.0 — Branch hygiene + platform-aware PR/MR
+- ✓ 1.10.0 — `/madd-recall` shipped in 2.0.0
+- ✓ 2.0.0 — Control center: hooks, skills, state, recall (this release)
 
-**1.9.0 — Full ship dogfood:**
-- Run `/madd-ship <real-feature>` on misua-id end-to-end
-- Run `/madd-learn` and verify MCP write to `agentmemory`
-- Patch surfaced friction → v2.x for affected skills
+**2.0.1 — Dogfood pass:**
+- End-to-end `/madd-init` + `/madd-ship` + `/madd-learn` + `/madd-recall` round-trip on a fresh repo
+- Re-run on misua-id (existing dogfood project) → patch surfaced friction
+- Verify all 3 hooks fire in real session (not just unit smoke)
+- Verify all 3 auto-trigger skills surface at correct moments
 
-**1.10.0 — `/madd-recall` skill:**
-- Query stored learnings during `/madd-ship` Phase 1
-- Surface relevant prior gotchas before spec is finalized
-- MCP `memory_smart_search` + LEARNINGS.md grep fallback
+**2.1.0 — Replace phase gates with hooks (where safe):**
+- Convert `AskUserQuestion` gates that have hook-checkable conditions into PostToolUse hooks
+- Keep `AskUserQuestion` for genuinely-human gates (spec approval, work-type ambiguity)
+- Add Windows PowerShell hook variants alongside the POSIX scripts
 
-**2.0.0 — Phase 2 GSD removal (milestone-level):**
+**2.2.0 — Phase 2 GSD removal (milestone-level):**
 - Audit remaining 25 GSD skills (milestone management group)
 - Remove unused; keep gsd-debug? gsd-code-review? evaluate vs madd-debug / madd-review
+
+**3.0.0 — Cross-session aggregation:**
+- `/madd-status --workspace` aggregates across all worktrees + members
+- Shared team checkpoints (opt-in, requires shared MCP)
+- Auto-merge `MADD-CHECKPOINTS.md` from peers
 
 ---
 

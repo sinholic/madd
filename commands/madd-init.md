@@ -1,8 +1,9 @@
 ---
-description: "Initialize AGENTS.md + WORKLOG.md for project. Detects stack + shape (single repo / monorepo / multi-repo workspace), asks user, writes files. Required before /madd-ship."
+description: "Initialize AGENTS.md + WORKLOG.md + .claude/settings.json (with MADD phase + commit-prefix + no-debug-code hooks) for project. Detects stack + shape (single repo / monorepo / multi-repo workspace), asks user, writes files. Required before /madd-ship."
 argument-hint: "[new|existing] [--member <pkg>] [--all-members]"
-version: "2.3.0"
+version: "2.4.0"
 changelog: |
+  2.4.0 — Step 8.5b registers three MADD phase-discipline hooks (madd-phase-guard, madd-commit-prefix, madd-no-debug-code) in generated settings.json; Step 8.5c gitignores .madd-ship-state.json + checkpoints
   2.3.0 — Step 8.5: write .claude/settings.json with model routing + forbidden-ops hooks (Sonnet default, Haiku confirmations, git push/npm publish/migrate/rm-rf gates)
   2.2.0 — Workspace + monorepo support: classify shape (single/mono/multi-repo), per-package AGENTS.md mode, root index for workspaces
   2.1.0 — Dogfood patches: parallel-call, find-not-glob, wrangler.json, merge gap detection, pnpm ls fallback
@@ -655,6 +656,23 @@ Store as `SETTINGS_MODE`. If Skip → jump to Step 9.
             "prompt": "DESTRUCTIVE: rm -rf $ARGUMENTS. Backup exists? Last chance to abort.",
             "if": "Bash(rm -rf *)",
             "model": "haiku"
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/madd-phase-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/madd-commit-prefix.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/madd-no-debug-code.sh"
           }
         ]
       }
@@ -671,6 +689,7 @@ Store as `SETTINGS_MODE`. If Skip → jump to Step 9.
 - No `"model"` → add `"model": "sonnet"`
 - No `permissions.ask` → add the full array above
 - No `hooks.PreToolUse` → add the full hooks block above
+- `hooks.PreToolUse` present but missing MADD entries → append the three MADD hooks (`madd-phase-guard`, `madd-commit-prefix` under `Bash` matcher; `madd-no-debug-code` under `Edit|Write` matcher). Deduplicate by `command` path so re-runs are idempotent.
 - No `attribution` → add attribution block
 - Preserve all existing keys
 
@@ -678,10 +697,11 @@ Store as `SETTINGS_MODE`. If Skip → jump to Step 9.
 
 `Bash`:
 ```bash
-test -f .gitignore && grep -q '\.claude/settings\.json' .gitignore && echo GITIGNORED || echo NOT_IGNORED
+test -f .gitignore && grep -q '\.claude/settings\.json' .gitignore && echo SETTINGS_GITIGNORED || echo SETTINGS_NOT_IGNORED
+test -f .gitignore && grep -q '\.madd-ship-state\.json' .gitignore && echo STATE_GITIGNORED || echo STATE_NOT_IGNORED
 ```
 
-If NOT_IGNORED → `AskUserQuestion`:
+For settings.json: if `SETTINGS_NOT_IGNORED` → `AskUserQuestion`:
 - question: "`.claude/settings.json` contains `model` + personal hooks. Add to .gitignore?"
 - header: "Gitignore"
 - options:
@@ -693,7 +713,25 @@ If Yes:
 echo '.claude/settings.json' >> .gitignore
 ```
 
+For MADD state files: if `STATE_NOT_IGNORED` → always add (no question; these are local-only operational artifacts):
+
+```bash
+cat >> .gitignore <<'EOF'
+
+# MADD operational state — local-only, do not commit
+.madd-ship-state.json
+.madd-ship-state.backup-*.json
+.madd-pending-sync
+.madd-learn-captured-*
+.madd-ship-archive/
+.madd-debug.md
+MADD-CHECKPOINTS.md
+EOF
+```
+
 **Note on team settings:** If you want team-wide hooks committed, use `.claude/settings.json`. For personal model override on top, use `.claude/settings.local.json` (gitignored, loads last, wins for overriding keys).
+
+**Note on MADD-CHECKPOINTS.md:** Some teams may want this committed for shared visibility into local pivots. If so, remove the gitignore line manually after init. Default is local-only because checkpoints are personal recovery state.
 
 ---
 
@@ -705,7 +743,12 @@ Report per shape:
 ```
 ✓ AGENTS.md written
 ✓ WORKLOG.md created/preserved
-✓ .claude/settings.json written (model: sonnet, forbidden-ops hooks)
+✓ .claude/settings.json written (model: sonnet, forbidden-ops + MADD phase hooks)
+✓ .gitignore updated (MADD state files local-only)
+Hooks registered:
+  - madd-phase-guard (blocks feat: commits before RED gate, push before green)
+  - madd-commit-prefix (enforces schema:/stub:/test(red):/feat:/refactor:/fix:)
+  - madd-no-debug-code (rejects console.log/print/debugger in non-test source)
 Next: /madd-ship <feature>
 ```
 
@@ -745,6 +788,8 @@ Next: cd <repo> && /madd-ship <feature>
 | settings.json invalid JSON after merge | Bad existing file | Show jq parse error; ask to overwrite or fix manually |
 | `.claude/` dir missing | Fresh repo | `mkdir -p .claude` before write (already in 8.5a bash) |
 | hooks don't fire after write | Session started before file existed | Tell user to open `/hooks` in Claude Code UI or restart session |
+| MADD phase hook references missing script | install.sh skipped hooks/ copy, or user installed commands/ only | Re-run `install.sh` or `/madd-update --include-hooks`. Until then, hook lines no-op silently — phase discipline reverts to AskUserQuestion gates only. |
+| `madd-commit-prefix.sh` doesn't block | Not opted-in (no state file AND AGENTS.md doesn't mention MADD) | This is by design — running `/madd-ship` once will create the state file and activate the hook. For repos that want the prefix discipline before first ship, manually `echo MADD >> AGENTS.md`. |
 
 ---
 
@@ -760,3 +805,7 @@ Next: cd <repo> && /madd-ship <feature>
 - Step 8.5 writes `.claude/settings.json` per-scope (not at workspace parent — workspace parent is not a project). For monorepo per-package mode, write one settings.json per member scope (not root), since `/madd-ship` operates at member level.
 - `.claude/settings.json` sets `"model": "sonnet"` — never auto-escalates to Opus. User must explicitly `/model opus` to override.
 - Forbidden-ops hooks use Haiku (cheapest model) for confirmation prompts — intentional: fast, cheap, non-blocking for the confirmation itself.
+- MADD phase hooks (`madd-phase-guard`, `madd-commit-prefix`, `madd-no-debug-code`) require the install.sh to have copied them to `~/.claude/hooks/`. If a user did manual install of `commands/` only, the hook lines will reference missing scripts — silent no-op. Run `install.sh` (or `/madd-update --include-hooks`) to fix.
+- `madd-commit-prefix.sh` activates only when `.madd-ship-state.json` exists OR `AGENTS.md` references MADD. New `/madd-init` runs will produce both — but a manually-cloned repo without `/madd-init` won't trigger the prefix hook.
+- `madd-no-debug-code.sh` is global (not gated on MADD opt-in) because debug code is a project-wide concern. Per-repo opt-out via `touch .madd-no-debug-code.disabled`.
+- Step 8.5c gitignore additions for MADD state files are unconditional — these files are purely operational and should never be committed. Override manually if a team policy requires shared state visibility.

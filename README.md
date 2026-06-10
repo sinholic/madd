@@ -2,6 +2,8 @@
 
 End-to-end feature delivery for Claude Code. SDD + TDD in 8 phases. Stack-agnostic. Real tool calls, not docs.
 
+Ships as a complete `.claude/` control center: commands, hooks (phase discipline + commit prefix + no-debug-code), and auto-trigger skills.
+
 ```
 Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production
 ```
@@ -46,12 +48,31 @@ Update later:
 
 ## Skills
 
-| Skill | Purpose |
-|-------|---------|
-| `/madd-init` | Detect stack (Bash + jq), ask conventions (AskUserQuestion), write AGENTS.md + WORKLOG.md |
-| `/madd-ship <feature>` | Drive 8-phase delivery: real gates, real commits, real PR, rollback path |
-| `/madd-learn <feature>` | Capture learnings → agent memory MCP (primary) + LEARNINGS.md (fallback) |
-| `/madd-update` | Fetch latest skills from configured source, diff, backup, apply |
+### Slash commands
+
+| Command | Purpose |
+|---------|---------|
+| `/madd-init` | Detect stack, scaffold `AGENTS.md` + `WORKLOG.md` + `.claude/settings.json` (with MADD hooks registered), gitignore state files |
+| `/madd-ship <feature>` | 8-phase delivery; persistent `.madd-ship-state.json` for resume + hook enforcement; auto-recalls prior learnings; file-tree work-type routing |
+| `/madd-learn <feature>` | Capture learnings → agent memory MCP + LEARNINGS.md fallback |
+| `/madd-recall <keywords>` | **NEW** — read prior learnings before drafting a spec |
+| `/madd-status` | **NEW** — one-screen digest of ship/debug/learn state |
+| `/madd-checkpoint` | **NEW** — snapshot state file + working tree before pivots |
+| `/madd-rollback` | **NEW** — restore from checkpoint (distinct from prod revert) |
+| `/madd-debug`, `/madd-review`, `/madd-secure`, `/madd-vibe`, `/madd-design`, `/madd-devops`, `/madd-data`, `/madd-robot` | Specialized flows |
+| `/madd-update` | Fetch latest from configured source, diff, backup, apply |
+
+### Hooks (`~/.claude/hooks/`)
+
+- `madd-phase-guard.sh` — blocks `feat:` commits before Phase 3 RED gate; blocks push before Phase 6 green
+- `madd-commit-prefix.sh` — enforces `schema:/stub:/test(red):/feat:/refactor:/fix:/Rollback:`
+- `madd-no-debug-code.sh` — rejects `console.log`/`print(`/`dbg!(`/`debugger;` in non-test source
+
+### Auto-trigger skills (`~/.claude/skills/`)
+
+- `madd-ship-resume` — surfaces existing ship on project open
+- `madd-pre-pr-check` — runs review + security before PR opens
+- `madd-post-learn` — prompts learn capture after merge
 
 ---
 
