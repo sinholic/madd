@@ -1,8 +1,9 @@
 ---
-description: "One-screen MADD status digest. Reads .madd-ship-state.json + .madd-debug.md + WORKLOG.md last entry + git state. No mutations."
-argument-hint: "[--terse] [--json]"
-version: "1.0.0"
+description: "One-line MADD status by default. Reads .madd-ship-state.json + .madd-debug.md + WORKLOG.md last entry + git state. No mutations. Pass --full for box-drawing digest."
+argument-hint: "[--full] [--json]"
+version: "1.1.0"
 changelog: |
+  1.1.0 — Default flipped to terse (one-line headline). Box-drawing digest opt-in via --full. Saves ~80% tokens on routine checks. --terse flag kept as deprecated alias.
   1.0.0 — Initial runbook
 ---
 
@@ -10,7 +11,7 @@ changelog: |
 
 You are executing `/madd-status`. Argument: **$ARGUMENTS**
 
-Goal: in one screen, tell the user where every MADD-touched workflow stands so they can resume cold.
+Goal: in one line (default) or one screen (`--full`), tell the user where every MADD-touched workflow stands so they can resume cold.
 
 Read-only. No edits, no commits, no MCP writes.
 
@@ -18,8 +19,11 @@ Read-only. No edits, no commits, no MCP writes.
 
 ## Step 1 — Parse args
 
-- `--terse` → print only 1-line headline per source.
+- `--full` → print box-drawing digest (the v1.0.0 default).
+- `--terse` → alias for default (kept for backwards compat). Default since v1.1.0 is terse.
 - `--json` → emit structured JSON instead of formatted digest. Useful for skills (e.g. `madd-ship-resume`) parsing it.
+
+Default (no flags) = terse.
 
 ---
 
@@ -107,7 +111,12 @@ Capture `CHECKPOINT_COUNT`.
 
 ## Step 4 — Print digest
 
-### 4a. Full mode (default)
+Dispatch on mode:
+- Default (no flag) or `--terse` → 4b (terse)
+- `--full` → 4a (box-drawing)
+- `--json` → 4c
+
+### 4a. Full mode (--full)
 
 ```
 MADD status — <project basename>
@@ -151,7 +160,7 @@ If `SHIP_PHASE = "none"` and `DEBUG_TOPIC = ""` → drop the "Next" section for 
 No active ship or debug session. Use /madd-ship <feature> to start.
 ```
 
-### 4b. Terse mode (`--terse`)
+### 4b. Terse mode (default)
 
 One line per active source. Format:
 ```
