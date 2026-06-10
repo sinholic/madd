@@ -1,8 +1,9 @@
 ---
-description: "Drive end-to-end feature delivery: Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production. SDD+TDD in 8 phases. Work-type routing: FE→/madd-design, DevOps→/madd-devops, Robot→/madd-robot, Data→/madd-data."
-argument-hint: "<feature description> [--member <name>] [--base <branch>] [--no-new-branch]"
-version: "3.0.0"
+description: "Drive end-to-end feature delivery: Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production. SDD+TDD in 8 phases. Persists .madd-ship-state.json for resume + hook enforcement. Recalls prior learnings before spec. Work-type routing: FE→/madd-design, DevOps→/madd-devops, Robot→/madd-robot, Data→/madd-data."
+argument-hint: "<feature description> [--member <name>] [--base <branch>] [--no-new-branch] [--resume] [--fresh]"
+version: "3.1.0"
 changelog: |
+  3.1.0 — Persistent state (.madd-ship-state.json) + resume protocol (Step 0j); file-tree work-type detection augments Step 0i keyword pass; Phase 1a auto-invokes /madd-recall to surface prior learnings; phase-boundary state writes power madd-phase-guard.sh hook
   3.0.0 — Work-type routing (Step 0i): auto-detect FE/BE/DevOps/Robot/Data; redirect Robot+Data to specialist skills; Phase 7d domain-specific UAT validation
   2.2.0 — Branch hygiene: pull latest base + create feature branch (Step 0h); platform-aware PR/MR (GitHub gh, GitLab glab); merge targets $BASE; --base + --no-new-branch flags
   2.1.0 — Monorepo + workspace support
@@ -214,11 +215,167 @@ Assign `WORK_TYPE`. Default: `BE` if no strong signal.
   - "DevOps / infra"
   - "Full-stack (FE + BE)"
 
+Store keyword pass as `WORK_TYPE_KEYWORD`.
+
+### 0i.5. File-tree work-type signal (lockfile-style precedence)
+
+Keyword-only routing misclassifies a feature whose description doesn't match the actual surface (e.g. "fix prod build" that touches only Dockerfile). Cross-check with the file tree if the branch already has commits.
+
+`Bash`:
+```bash
+git diff --name-only "$BASE"...HEAD 2>/dev/null | head -50
+```
+
+If output empty (first ship for this branch) → skip this sub-step; rely on keyword `WORK_TYPE_KEYWORD`. Re-run this signal at Phase 2 commit (state file tracks `tree_signal_resolved` boolean).
+
+If output non-empty, classify each path:
+
+| Path pattern | Signal |
+|--------------|--------|
+| `Dockerfile`, `docker-compose*`, `.github/workflows/**`, `wrangler.*`, `vercel.json`, `fly.toml`, `render.yaml`, `app.yaml`, `serverless.yml`, `terraform/**`, `helm/**`, `k8s/**` | DEVOPS |
+| `**/*.tsx`, `**/*.jsx`, `**/*.vue`, `**/*.svelte`, `**/*.astro`, `app/**`, `src/components/**`, `src/pages/**`, `src/views/**`, `styles/**`, `*.css`, `*.scss` | FE |
+| `prisma/migrations/**`, `**/*.sql`, `migrations/**`, `seeds/**`, `db/**`, `**/*-migration.{js,ts,py}` | DATA |
+| `**/*.mq4`, `**/*.mq5`, `**/*.ino`, `firmware/**`, `arduino/**` | ROBOT |
+| `**/api/**`, `**/handlers/**`, `**/controllers/**`, `**/services/**`, `**/*.py` (non-test), `**/*.go`, `**/*.rs`, `**/*.java`, `routes/**` | BE |
+
+Tally per category. The category with strictly the most matches → `WORK_TYPE_TREE`. Tie → leave unset.
+
+### 0i.6. Precedence merge
+
+| WORK_TYPE_KEYWORD | WORK_TYPE_TREE | → WORK_TYPE | Action |
+|-------------------|----------------|-------------|--------|
+| set | unset | KEYWORD | use keyword |
+| unset | set | TREE | use tree |
+| set | set, same | KEYWORD | use either |
+| set | set, FE/BE mix (any pair) | FULLSTACK | promote |
+| set | set, different (other) | TREE | tree wins; `AskUserQuestion` to confirm: keyword said X, file tree says Y, which? (tree default) |
+| unset | unset | BE | default fallback |
+
 Store final value as `WORK_TYPE`.
+
+The ROBOT / DATA prompts above (in 0i) still fire if EITHER pass detects those — protect against expert mode auto-routing into a TDD flow that doesn't fit.
+
+---
+
+## Step 0j — Resume protocol (state file)
+
+MADD persists ship state to `.madd-ship-state.json` at the repo root so an interrupted ship can resume cleanly and the `madd-phase-guard.sh` hook can enforce gates.
+
+### 0j.a. Detect existing state
+
+`Bash`:
+```bash
+test -f .madd-ship-state.json && cat .madd-ship-state.json || echo MISSING
+```
+
+If MISSING → no resume; jump to 0j.c (initialize fresh state) and continue to Phase 1.
+
+If present, parse:
+- `state.feature` → existing feature name
+- `state.branch` → branch the ship was running on
+- `state.phase` → last completed phase
+- `state.phase_started` → ISO timestamp
+
+### 0j.b. Branch / argument reconciliation
+
+| state.feature | $ARGUMENTS feature | state.branch | current branch | Action |
+|---------------|--------------------|--------------|----------------|--------|
+| matches | matches | matches current | matches | **Resume offer** |
+| matches | matches | matches | different | Ask: `git checkout $state.branch` then resume? |
+| different | different | matches current | current branch | Ask: continue old or checkpoint + start new? |
+| matches | empty (`/madd-ship` no args) | matches current | matches | **Resume offer** (no args treated as resume request) |
+
+`AskUserQuestion` (only if `--resume` not passed and `--fresh` not passed):
+- question: "Existing ship state for `<state.feature>` at phase <state.phase>. Resume or start fresh?"
+- header: "Ship state"
+- options:
+  - "Resume from phase <N>" — load state into working memory; skip to that phase
+  - "Show state, then decide" — Read state file in full; loop back
+  - "Checkpoint + start fresh" — invoke `/madd-checkpoint --note "auto-pre-fresh"` then continue to 0j.c
+  - "Start fresh (discard state)" — wipe `.madd-ship-state.json`; warn loudly; continue
+
+If `--resume` passed → skip the question, auto-resume.
+If `--fresh` passed → skip the question, auto-discard (still print a warning).
+
+### 0j.c. Initialize / refresh state
+
+Write `.madd-ship-state.json` via `Write` (overwrite is OK after the discard branch above):
+
+```json
+{
+  "feature": "<derived from $ARGUMENTS>",
+  "feature_description": "<full $ARGUMENTS minus flags>",
+  "branch": "<FEATURE_BRANCH from Step 0h>",
+  "base": "<BASE from Step 0h>",
+  "ship_mode": "<SHIP_MODE from Step 0g>",
+  "work_type": "<WORK_TYPE from Step 0i.6>",
+  "member": "<MEMBER or null>",
+  "phase": "0",
+  "phase_started": "<ISO from `date -u +%Y-%m-%dT%H:%M:%SZ`>",
+  "tests_red_confirmed": false,
+  "last_test_exit": null,
+  "tree_signal_resolved": false,
+  "spec": null,
+  "conventions": null,
+  "_meta": {
+    "madd_version": "3.1.0",
+    "created_at": "<ISO>"
+  }
+}
+```
+
+Add the gitignore entry if missing (madd-init does this on initial scaffold, but a manually-cloned repo may lack it):
+
+`Bash`:
+```bash
+grep -q '\.madd-ship-state\.json' .gitignore 2>/dev/null || echo '.madd-ship-state.json' >> .gitignore
+grep -q '\.madd-ship-state\.backup-' .gitignore 2>/dev/null || echo '.madd-ship-state.backup-*.json' >> .gitignore
+```
+
+### 0j.d. Phase update helper
+
+Throughout the remaining steps, when a phase boundary is crossed, update the state file. Helper logic — at each marked spot ("**[state]** ..." callouts below):
+
+`Bash` (preferred; jq if available):
+```bash
+node -e "
+const fs = require('fs');
+const path = '.madd-ship-state.json';
+const j = JSON.parse(fs.readFileSync(path, 'utf8'));
+// updates applied here, e.g.:
+j.phase = '4';
+j.phase_started = new Date().toISOString();
+j.tests_red_confirmed = true;
+fs.writeFileSync(path, JSON.stringify(j, null, 2));
+"
+```
+
+The hook `~/.claude/hooks/madd-phase-guard.sh` reads these fields. Stale or missing updates → hook misfires. Always apply at the marked spots.
 
 ---
 
 ## Phase 1 — Spec (skip if SHIP_MODE ≠ Standard)
+
+### 1a.pre — Recall prior learnings
+
+Before drafting, ask MADD memory whether anything relevant has been captured already.
+
+Invoke `/madd-recall <feature-keywords> --from-ship --limit 5`. Keywords = noun phrases from the feature description (strip stop words: "add", "the", "a", "fix", "to").
+
+Read the structured JSON envelope from `/madd-recall`'s response. If `recall.count > 0`:
+
+`AskUserQuestion`:
+- question: "Surface <recall.count> prior learning(s) for related work. Inherit constraints into this spec?"
+- header: "Recall"
+- options:
+  - "Show me the matches first" — print the formatted digest, then re-ask
+  - "Apply all as 'must consider'" — copy into spec's `Prerequisites` section
+  - "Pick which to apply" — multi-select via second `AskUserQuestion`
+  - "Skip — none relevant"
+
+If `recall.count == 0` or `/madd-recall` was unavailable → print one line ("No prior learnings matched.") and continue to 1a draft.
+
+This step is silent during Quickfix / Hotfix (`SHIP_MODE ≠ Standard`).
 
 ### 1a. Draft spec
 
@@ -277,6 +434,14 @@ Store as `SPEC_CONVENTIONS`.
 
 Only on "Approved" → continue. On "Revise" → loop back to 1a. On "Abort" → stop cleanly.
 
+**[state]** On approval, update `.madd-ship-state.json`:
+```
+phase = "1"
+spec = { feature, prerequisites, acceptance_criteria, named_test_list, out_of_scope, security }
+conventions = SPEC_CONVENTIONS
+phase_started = now
+```
+
 ---
 
 ## Phase 2 — Schema (skip if SHIP_MODE = Quickfix)
@@ -306,6 +471,8 @@ Choose validator based on AGENTS.md `LANGUAGE`:
 git add <schema-files>
 git commit -m "schema: add types for <feature>"
 ```
+
+**[state]** After commit: `phase = "2"`, `phase_started = now`. Re-run Step 0i.5 file-tree signal now that diff exists; set `tree_signal_resolved = true`.
 
 ---
 
@@ -355,6 +522,8 @@ Verify output: all new tests fail with **assertion errors** (not import errors, 
 git add <test-files>
 git commit -m "test(red): <feature> — all N tests failing"
 ```
+
+**[state]** After RED gate confirmed in 3c AND commit lands: `phase = "3"`, `tests_red_confirmed = true`, `phase_started = now`. This unblocks `feat:` commits per `madd-phase-guard.sh`.
 
 ---
 
@@ -411,6 +580,8 @@ git add <impl-files> WORKLOG.md
 git commit -m "feat: <feature>"
 ```
 
+**[state]** After commit: `phase = "4"`, `phase_started = now`.
+
 ---
 
 ## Phase 5 — Green & Refactor
@@ -449,6 +620,8 @@ Fix any errors. Re-run until clean.
 git diff --quiet || git commit -am "refactor: <feature> — clean up after green"
 ```
 
+**[state]** After 5a green confirmed: capture `last_test_exit = 0` and update `phase = "5"`. (This is the canonical "tests passed" timestamp the push hook reads.)
+
 ---
 
 ## Phase 6 — CI / Build gate
@@ -462,12 +635,18 @@ git diff --quiet || git commit -am "refactor: <feature> — clean up after green
 
 Both must pass. Do not bypass hooks. Do not skip type errors.
 
+**[state]** Capture exit code of `<TEST_CMD>` (independently of `&&` chain so failure mode is recorded): re-run `<TEST_CMD>; echo "exit=$?"` if needed, then update `last_test_exit = <code>`. If `<BUILD_CMD>` also failed, set `last_build_exit = <code>`. Hook reads `last_test_exit` before allowing `git push`.
+
 ### 6b. Push feature branch
 
 `Bash`:
 ```bash
 git push -u origin "$FEATURE_BRANCH"
 ```
+
+If the push is blocked by `madd-phase-guard.sh`, inspect the structured hook reason. If it cites a stale `last_test_exit`, the recovery is to re-run `<TEST_CMD>` and update state — never bypass the hook with `--no-verify`.
+
+**[state]** After successful push: `phase = "6"`, `phase_started = now`, `pr_url = <captured from 6d>` (after 6d runs).
 
 ### 6c. Detect platform
 
@@ -574,6 +753,8 @@ Run in background if long-lived (use `run_in_background: true`).
 
 If failed: report which criteria, stop, suggest fixes.
 
+**[state]** After "All pass": `phase = "7"`, `phase_started = now`, `uat_passed = true`.
+
 ### 7d. Domain-specific validation (WORK_TYPE routing)
 
 **If `WORK_TYPE` = `FE` or `FULLSTACK`:**
@@ -679,7 +860,34 @@ Always prompt:
 > Or run interactively:
 >   `/madd-learn <feature-name>`
 
-Do not auto-run — let user decide whether to capture.
+Do not auto-run — let user decide whether to capture. The `madd-post-learn` skill will also fire passively when the merge is detected and offer the same.
+
+**[state]** After 8b live verify passes: `phase = "8"`, `phase_started = now`, `deployed_at = <ISO>`, `live_url = <if available>`.
+
+### 8e. Cycle cleanup
+
+After successful production verify (and after `/madd-learn` is offered), offer cleanup:
+
+`AskUserQuestion`:
+- question: "Ship complete. Clean up `.madd-ship-state.json` and checkpoints?"
+- header: "Cleanup"
+- options:
+  - "Yes — archive state to `.madd-ship-archive/`" (Recommended; preserves audit trail without leaving live state around to confuse the next ship)
+  - "Yes — delete outright"
+  - "No — keep state file as is"
+
+On archive:
+```bash
+mkdir -p .madd-ship-archive
+mv .madd-ship-state.json ".madd-ship-archive/<feature>-<ISO>.json"
+```
+
+On delete:
+```bash
+rm -f .madd-ship-state.json
+```
+
+In both cases, leave `.madd-ship-state.backup-*.json` files for the user to sweep manually.
 
 ---
 
@@ -762,3 +970,6 @@ Use `Agent` tool with `subagent_type: "general-purpose"` and the above as prompt
 - Agent handoff substitutes **real values** before sending — no `<placeholder>` syntax in the final prompt.
 - Rollback verifies commit hash exists before reverting.
 - `SHIP_MODE` branches behavior — Quickfix/Hotfix skip declared phases.
+- `.madd-ship-state.json` is a real load-bearing artifact, not documentation. `madd-phase-guard.sh` reads `tests_red_confirmed` and `last_test_exit` from it to gate `feat:` commits and `git push`. Stale state → hook misfires. The "**[state]**" callouts after each phase are not optional reminders; the runbook depends on the writes landing.
+- `.madd-ship-state.json` is local-only (gitignored). Do not commit it.
+- Resume protocol (Step 0j) trusts the state file. If a teammate hands you a branch with no state, run `--fresh` — don't reconstruct state by hand.

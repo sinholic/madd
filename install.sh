@@ -1,15 +1,55 @@
 #!/usr/bin/env bash
 #
-# MADD bootstrap installer
+# MADD bootstrap installer (v2.0)
 # Usage: curl -fsSL https://raw.githubusercontent.com/sinholic/madd/main/install.sh | bash
+#
+# Installs:
+#   - commands/   → ~/.claude/commands/      (slash commands)
+#   - hooks/      → ~/.claude/hooks/         (phase discipline + commit prefix + no-debug-code)
+#   - skills/     → ~/.claude/skills/        (auto-trigger workflows)
 #
 
 set -euo pipefail
 
 REPO_BASE="${MADD_REPO_BASE:-https://raw.githubusercontent.com/sinholic/madd/main}"
 COMMANDS_DIR="${HOME}/.claude/commands"
+HOOKS_DIR="${HOME}/.claude/hooks"
+SKILLS_DIR="${HOME}/.claude/skills"
 CONFIG_FILE="${HOME}/.claude/MADD.config"
-SKILLS=(madd-init madd-ship madd-learn madd-update)
+
+# Slash commands shipped by MADD (16 total as of 2.0)
+COMMANDS=(
+  madd-init
+  madd-ship
+  madd-learn
+  madd-recall
+  madd-status
+  madd-checkpoint
+  madd-rollback
+  madd-update
+  madd-debug
+  madd-review
+  madd-secure
+  madd-vibe
+  madd-design
+  madd-devops
+  madd-data
+  madd-robot
+)
+
+# Phase-discipline hooks
+HOOKS=(
+  madd-phase-guard.sh
+  madd-commit-prefix.sh
+  madd-no-debug-code.sh
+)
+
+# Auto-trigger skills (Anthropic SKILL.md format)
+SKILLS=(
+  madd-ship-resume
+  madd-pre-pr-check
+  madd-post-learn
+)
 
 # Color output (skip if not TTY)
 if [ -t 1 ]; then
@@ -25,36 +65,82 @@ err()  { printf "${RED}[madd]${NC} %s\n" "$*" >&2; }
 # Pre-flight
 command -v curl >/dev/null 2>&1 || { err "curl required"; exit 1; }
 
-log "Installing MADD to ${COMMANDS_DIR}"
-mkdir -p "${COMMANDS_DIR}"
-mkdir -p "${COMMANDS_DIR}/.backup"
+log "Installing MADD"
+log "  commands → ${COMMANDS_DIR}"
+log "  hooks    → ${HOOKS_DIR}"
+log "  skills   → ${SKILLS_DIR}"
 
-# Backup existing
+mkdir -p "${COMMANDS_DIR}" "${COMMANDS_DIR}/.backup"
+mkdir -p "${HOOKS_DIR}"    "${HOOKS_DIR}/.backup"
+mkdir -p "${SKILLS_DIR}"
+
 TS=$(date -u +%Y%m%d-%H%M%S)
-for skill in "${SKILLS[@]}"; do
-  target="${COMMANDS_DIR}/${skill}.md"
-  if [ -f "${target}" ]; then
-    cp "${target}" "${COMMANDS_DIR}/.backup/${skill}.md.bak.${TS}"
-    log "backed up existing ${skill}.md"
-  fi
-done
+INSTALLED=0
+SKIPPED=0
 
-# Fetch skills
-for skill in "${SKILLS[@]}"; do
-  url="${REPO_BASE}/commands/${skill}.md"
-  target="${COMMANDS_DIR}/${skill}.md"
-  if curl -fsSL "${url}" -o "${target}.tmp"; then
+# --- Commands ---
+log "Installing commands..."
+for cmd in "${COMMANDS[@]}"; do
+  target="${COMMANDS_DIR}/${cmd}.md"
+  if [ -f "${target}" ]; then
+    cp "${target}" "${COMMANDS_DIR}/.backup/${cmd}.md.bak.${TS}"
+  fi
+  url="${REPO_BASE}/commands/${cmd}.md"
+  if curl -fsSL "${url}" -o "${target}.tmp" 2>/dev/null; then
     mv "${target}.tmp" "${target}"
     version=$(grep '^version:' "${target}" 2>/dev/null | head -1 | sed 's/version: //; s/"//g' || echo "?")
-    log "installed ${skill} v${version}"
+    log "  ✓ ${cmd} v${version}"
+    INSTALLED=$((INSTALLED + 1))
   else
-    err "failed to fetch ${skill} from ${url}"
+    warn "  ✗ ${cmd} (not found at ${url}; skipping)"
     rm -f "${target}.tmp"
-    exit 1
+    SKIPPED=$((SKIPPED + 1))
   fi
 done
 
-# Write config
+# --- Hooks ---
+log "Installing hooks..."
+for hook in "${HOOKS[@]}"; do
+  target="${HOOKS_DIR}/${hook}"
+  if [ -f "${target}" ]; then
+    cp "${target}" "${HOOKS_DIR}/.backup/${hook}.bak.${TS}"
+  fi
+  url="${REPO_BASE}/hooks/${hook}"
+  if curl -fsSL "${url}" -o "${target}.tmp" 2>/dev/null; then
+    mv "${target}.tmp" "${target}"
+    chmod +x "${target}"
+    version=$(grep '^# madd-hook-version:' "${target}" 2>/dev/null | head -1 | sed 's/.*: //' || echo "?")
+    log "  ✓ ${hook} v${version}"
+    INSTALLED=$((INSTALLED + 1))
+  else
+    warn "  ✗ ${hook} (not found at ${url}; skipping)"
+    rm -f "${target}.tmp"
+    SKIPPED=$((SKIPPED + 1))
+  fi
+done
+
+# --- Skills (auto-trigger) ---
+log "Installing skills..."
+for skill in "${SKILLS[@]}"; do
+  target_dir="${SKILLS_DIR}/${skill}"
+  mkdir -p "${target_dir}"
+  target="${target_dir}/SKILL.md"
+  if [ -f "${target}" ]; then
+    cp "${target}" "${HOOKS_DIR}/.backup/${skill}-SKILL.md.bak.${TS}"
+  fi
+  url="${REPO_BASE}/skills/${skill}/SKILL.md"
+  if curl -fsSL "${url}" -o "${target}.tmp" 2>/dev/null; then
+    mv "${target}.tmp" "${target}"
+    log "  ✓ ${skill}"
+    INSTALLED=$((INSTALLED + 1))
+  else
+    warn "  ✗ ${skill} (not found at ${url}; skipping)"
+    rm -f "${target}.tmp"
+    SKIPPED=$((SKIPPED + 1))
+  fi
+done
+
+# --- Config ---
 if [ ! -f "${CONFIG_FILE}" ]; then
   cat > "${CONFIG_FILE}" <<EOF
 # MADD configuration
@@ -66,18 +152,30 @@ else
   warn "${CONFIG_FILE} exists — left untouched"
 fi
 
-# Summary
+# --- Summary ---
 echo
-log "✓ MADD installed"
+log "✓ MADD installed — ${INSTALLED} artifacts, ${SKIPPED} skipped"
 echo
 echo "Next steps:"
-echo "  1. Restart Claude Code so skills are surfaced"
-echo "  2. In any project, run:"
-echo "       /madd-init       # Scaffold AGENTS.md + WORKLOG.md"
-echo "       /madd-ship <feature description>"
-echo "       /madd-learn <feature-name>     # After shipping"
+echo "  1. Restart Claude Code so commands/hooks/skills are surfaced"
+echo "  2. In any project:"
+echo "       /madd-init                       # Scaffold AGENTS.md + .claude/settings.json (registers MADD hooks)"
+echo "       /madd-ship <feature description> # 8-phase delivery with state persistence + recall"
+echo "       /madd-learn <feature-name>       # After shipping — capture to memory"
+echo "       /madd-recall <keywords>          # Read back prior learnings"
+echo "       /madd-status                     # Where am I in the ship?"
+echo "       /madd-checkpoint                 # Snapshot before pivot"
+echo "       /madd-rollback                   # Restore snapshot"
 echo
-echo "Update later:"
-echo "  /madd-update"
+echo "Phase discipline (hooks active after /madd-init):"
+echo "  - madd-phase-guard       blocks feat: before Phase 3 RED + push before Phase 6 green"
+echo "  - madd-commit-prefix     enforces schema:/stub:/test(red):/feat:/refactor:/fix:/Rollback:"
+echo "  - madd-no-debug-code     rejects console.log/print/dbg!/debugger in non-test source"
 echo
+echo "Auto-trigger skills:"
+echo "  - madd-ship-resume       offers resume when .madd-ship-state.json present"
+echo "  - madd-pre-pr-check      runs /madd-review + /madd-secure before PR"
+echo "  - madd-post-learn        prompts /madd-learn after merge"
+echo
+echo "Update later: /madd-update"
 echo "Docs: https://github.com/sinholic/madd"
