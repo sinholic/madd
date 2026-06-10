@@ -1,8 +1,9 @@
 ---
-description: "Review source code for bugs, security issues, code quality. Produces REVIEW.md with severity-classified findings. Real tool calls."
+description: "Review source code for bugs, security issues, code quality. Domain-aware: FE, DevOps, Robot/hardware, Data checks added automatically based on file types. Produces REVIEW.md with severity-classified findings."
 argument-hint: "[--diff | --files <paths> | --pr <num>] [--severity high|all] [--fix]"
-version: "1.0.0"
+version: "1.1.0"
 changelog: |
+  1.1.0 — Domain-specific checks (Step 3e): auto-detects FE/DevOps/Robot/Data from file extensions; adds domain rules per type
   1.0.0 — Initial runbook: scoped review, severity classification, optional auto-fix
 ---
 
@@ -105,6 +106,56 @@ For each file, check:
 - Sync I/O in hot path
 - O(n²) where O(n) trivially achievable
 - Memory leaks (unbounded caches, retained references)
+
+### 3e. Domain-specific checks (auto-detect from file extensions)
+
+Detect domains from `SCOPE` file paths:
+```bash
+echo "$SCOPE_FILES" | grep -E "\.(tsx|jsx|vue|svelte|css|scss|less)$" && echo "HAS_FE"
+echo "$SCOPE_FILES" | grep -E "Dockerfile|docker-compose|\.gitlab-ci\.yml|\.github/workflows" && echo "HAS_DEVOPS"
+echo "$SCOPE_FILES" | grep -E "\.(mq5|mq4|ino)$|firmware|embedded" && echo "HAS_ROBOT"
+echo "$SCOPE_FILES" | grep -E "migrations/|seeds/|pipeline/|backfill" && echo "HAS_DATA"
+```
+
+**If HAS_FE — frontend additional checks:**
+- Hardcoded `px`/hex color values instead of CSS variables or design tokens
+- `!important` usage (specificity hacks)
+- Missing `aria-*` attributes on interactive elements (`<button>`, `<input>`, `<a>` without label)
+- Missing `alt` text on `<img>`
+- `any` type cast on user-facing data in TypeScript
+- `console.log` / `console.error` left in production code
+- Inline styles for anything beyond truly one-off layout
+- Missing loading/error states for async data
+
+**If HAS_DEVOPS — infra additional checks:**
+- Secrets hardcoded: `ENV PASSWORD=`, `ENV API_KEY=`, `ARG TOKEN=` → CRITICAL
+- `--privileged` container flag without justification comment → HIGH
+- Missing `HEALTHCHECK` in Dockerfile → MEDIUM
+- Docker base image with `:latest` tag (not pinned) → MEDIUM
+- Missing `restart: unless-stopped` on production services in compose → MEDIUM
+- CI job with `allow_failure: true` on critical stage → HIGH
+- Third-party CI actions not pinned to commit SHA → MEDIUM
+- Missing resource limits (`mem_limit`, `cpus`) in compose → LOW
+
+**If HAS_ROBOT — hardware/firmware additional checks:**
+- `delay()` or blocking calls inside ISR / interrupt handler → CRITICAL
+- Dynamic memory allocation (`malloc`, `new`) in real-time loop → HIGH
+- Missing watchdog timer reset in main loop → HIGH
+- Magic numbers for pin/register assignments (should be named constants) → MEDIUM
+- Missing overflow check on counter/timer variables → MEDIUM
+- MQL5: `Sleep()` inside `OnTick()` or `OnCalculate()` → CRITICAL
+- MQL5: unchecked return value on `OrderSend()`, `OrderModify()`, `OrderClose()` → HIGH
+- MQL5: array access without bounds check → HIGH
+- Arduino: `millis()` overflow not handled → MEDIUM
+
+**If HAS_DATA — data/migration additional checks:**
+- Migration without corresponding `down()` function → CRITICAL
+- Non-idempotent operation (INSERT without `ON CONFLICT` or existence check) → HIGH
+- `DROP COLUMN` or destructive change without backup table in same migration → HIGH
+- Raw `UPDATE` or `DELETE` without `WHERE` clause → CRITICAL
+- Seed file with hardcoded auto-increment IDs → MEDIUM
+- Pipeline job without error handling or retry logic → HIGH
+- `db:migrate` called in seed or vice versa → HIGH
 
 **Skip:** taste-based stylistic feedback. Skip nitpicks. Severity floor.
 

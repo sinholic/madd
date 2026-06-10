@@ -1,8 +1,9 @@
 ---
-description: "Systematic debugging session. Reproduces bug, isolates, fixes, validates. Real tool calls, persistent state in DEBUG.md."
+description: "Systematic debugging session. Reproduces bug, isolates, fixes, validates. Domain-aware: Robot/hardware and Data/migration get adapted reproduction + hypothesis paths. Persistent state in DEBUG.md."
 argument-hint: "<bug description>"
-version: "1.0.0"
+version: "1.1.0"
 changelog: |
+  1.1.0 — Domain detection (Step 0b): Robot/hardware uses serial monitor + flash cycle; Data uses SQL replay + EXPLAIN ANALYZE
   1.0.0 — Initial runbook: scientific method, persistent state, real tool calls
 ---
 
@@ -26,6 +27,42 @@ git rev-parse --short HEAD
 `Read`: `AGENTS.md` — extract `TEST_CMD`, `BUILD_CMD`, `DEV_CMD`, `LANGUAGE`, `FRAMEWORK`.
 
 If AGENTS.md missing → still proceed, but skip auto-detected commands.
+
+### Step 0b. Detect debug domain
+
+Detect from AGENTS.md `LANGUAGE` field + bug description keywords + file extensions in repo:
+
+```bash
+find . -maxdepth 5 \( -name "*.mq5" -o -name "*.mq4" -o -name "*.ino" \
+  -o -name "platformio.ini" -o -name "idf_component.yml" \) 2>/dev/null | head -5
+find . -maxdepth 5 -path "*/migrations/*" -o -path "*/seeds/*" -o -path "*/pipeline/*" 2>/dev/null | head -5
+```
+
+Store `DEBUG_DOMAIN`:
+- `.mq5`, `.mq4`, `.ino`, `platformio.ini`, or hardware keywords in bug description → `ROBOT`
+- `migrations/`, `seeds/`, `pipeline/` paths, or SQL/backfill keywords in bug description → `DATA`
+- Everything else → `SOFTWARE` (normal flow)
+
+**If ROBOT domain detected:**
+
+> Hardware debugging differs from software. Key differences:
+> - Cannot reproduce without hardware attached (or simulator)
+> - Logs come from serial monitor (Arduino/ESP32) or MT5 Journal (MQL5), not stdout
+> - `git bisect` still works but each step requires a flash cycle
+
+Adapted steps apply:
+- **Step 2b Reproduce**: capture from serial monitor or MT5 Journal (instructions below)
+- **Step 3c Hypotheses test**: instrument with `Serial.print()` / `Print()`, re-flash, observe output
+- **Step 4c Regression test**: write simulation test if platform supports it; otherwise document manual repro as test substitute
+
+**If DATA domain detected:**
+
+> Data debugging uses SQL introspection instead of test runners.
+
+Adapted steps apply:
+- **Step 2b Reproduce**: run migration in transaction rollback mode; capture `EXPLAIN ANALYZE` output
+- **Step 3c Hypotheses test**: query staging DB snapshot directly; isolate rows affected by bug condition
+- **Step 4c Regression test**: write idempotency test or add migration guard (existence check)
 
 ---
 

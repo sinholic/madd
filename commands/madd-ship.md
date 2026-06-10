@@ -1,8 +1,9 @@
 ---
-description: "Drive end-to-end feature delivery: Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production. SDD+TDD in 8 phases. Real tool invocations, not docs."
+description: "Drive end-to-end feature delivery: Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production. SDD+TDD in 8 phases. Work-type routing: FE→/madd-design, DevOps→/madd-devops, Robot→/madd-robot, Data→/madd-data."
 argument-hint: "<feature description> [--member <name>] [--base <branch>] [--no-new-branch]"
-version: "2.2.0"
+version: "3.0.0"
 changelog: |
+  3.0.0 — Work-type routing (Step 0i): auto-detect FE/BE/DevOps/Robot/Data; redirect Robot+Data to specialist skills; Phase 7d domain-specific UAT validation
   2.2.0 — Branch hygiene: pull latest base + create feature branch (Step 0h); platform-aware PR/MR (GitHub gh, GitLab glab); merge targets $BASE; --base + --no-new-branch flags
   2.1.0 — Monorepo + workspace support
   2.0.0 — Operational runbook rewrite
@@ -166,6 +167,54 @@ git checkout -b "$FEATURE_BRANCH"
 Store `BASE` + `FEATURE_BRANCH` for Phase 6 (PR target).
 
 If user picked "Use existing branch": verify it's not `$BASE` itself.
+
+### 0i. Detect work type
+
+Parse feature description (from `$ARGUMENTS` minus flags) for domain keywords:
+
+| WORK_TYPE | Detection keywords |
+|-----------|--------------------|
+| `FE` | component, page, UI, frontend, design, view, layout, style, CSS, Next.js, React, Vue, Svelte, screen, modal, form, button |
+| `BE` | API, endpoint, controller, service, NestJS, backend, REST, GraphQL, handler, middleware |
+| `DEVOPS` | Dockerfile, docker-compose, CI, pipeline, deploy, infra, k8s, kubernetes, nginx, proxy, workflow, GitHub Actions, GitLab CI |
+| `ROBOT` | MQL5, MQL4, EA, Expert Advisor, Arduino, ESP32, firmware, embedded, hardware, mechatronics, flash, microcontroller |
+| `DATA` | migration, seed, ETL, backfill, database schema, Sequelize, data job, data pipeline, ALTER TABLE, DROP COLUMN |
+| `FULLSTACK` | FE + BE keywords both present in same description |
+
+Assign `WORK_TYPE`. Default: `BE` if no strong signal.
+
+**If ROBOT keywords detected** → stop and inform:
+> Hardware/firmware work detected. `/madd-ship` uses TDD + CI which doesn't apply to hardware.
+> `/madd-robot` has the correct flow: spec → static analysis → compile → simulate → flash → validate.
+
+`AskUserQuestion`:
+- question: "Use /madd-robot instead?"
+- header: "Work type"
+- options:
+  - "Yes — abort, I'll use /madd-robot"
+  - "No — continue with madd-ship (expert mode)"
+
+**If DATA keywords detected** → stop and inform:
+> Data migration/pipeline work detected. `/madd-ship`'s TDD flow doesn't fit.
+> `/madd-data` has the correct flow: spec → schema analysis → write down+up → idempotency → dry-run → run → validate.
+
+`AskUserQuestion`:
+- question: "Use /madd-data instead?"
+- header: "Work type"
+- options:
+  - "Yes — abort, I'll use /madd-data"
+  - "No — continue with madd-ship (expert mode)"
+
+**If ambiguous** (keywords match 2+ unrelated types, not FULLSTACK) → `AskUserQuestion`:
+- question: "Work type ambiguous. What best describes this change?"
+- header: "Work type"
+- options:
+  - "FE / frontend only"
+  - "BE / backend API only"
+  - "DevOps / infra"
+  - "Full-stack (FE + BE)"
+
+Store final value as `WORK_TYPE`.
 
 ---
 
@@ -524,6 +573,34 @@ Run in background if long-lived (use `run_in_background: true`).
   - "Some failed — abort or fix"
 
 If failed: report which criteria, stop, suggest fixes.
+
+### 7d. Domain-specific validation (WORK_TYPE routing)
+
+**If `WORK_TYPE` = `FE` or `FULLSTACK`:**
+
+`AskUserQuestion`:
+- question: "Run design validation against mockups/Figma?"
+- header: "Design check"
+- options:
+  - "Yes — run /madd-design (will check Figma/Jira reference)"
+  - "No — skip design check"
+
+If yes: read and follow `/madd-design` runbook. Pass `--diff` to scope to current branch changes.
+
+**If `WORK_TYPE` = `DEVOPS`:**
+
+`AskUserQuestion`:
+- question: "Run DevOps config review?"
+- header: "Infra check"
+- options:
+  - "Yes — run /madd-devops (Dockerfile, CI, worker, deploy review)"
+  - "No — skip infra check"
+
+If yes: read and follow `/madd-devops` runbook. Pass `--diff` to scope to current changes.
+
+**If `WORK_TYPE` = `BE` or default:**
+
+Standard UAT from Step 7c is sufficient. Skip this step.
 
 ---
 
