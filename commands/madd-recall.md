@@ -1,8 +1,9 @@
 ---
-description: "Recall prior MADD learnings before drafting a spec. Queries agentmemory MCP (smart search) with LEARNINGS.md grep fallback. Surfaces prior gotchas, decisions, and confidence for the topic."
-argument-hint: "<feature-keywords> [--limit N] [--min-confidence 0.0-1.0] [--source mcp|file|both]"
-version: "1.0.0"
+description: "Recall prior MADD learnings before drafting a spec. Cache → agentmemory MCP smart search → LEARNINGS.md grep fallback. Surfaces prior gotchas, decisions, and confidence for the topic."
+argument-hint: "<feature-keywords> [--limit N] [--min-confidence 0.0-1.0] [--source mcp|file|both] [--no-cache] [--cache-ttl <seconds>]"
+version: "1.1.0"
 changelog: |
+  1.1.0 — Cache layer (.madd-recall-cache.json with 1h TTL). Repeat queries within TTL skip MCP/file pass. /madd-ship Phase 1 spec iteration loops now near-free for recall.
   1.0.0 — Initial runbook. Closes MADD.md roadmap 1.10.0 (`/madd-recall` skill).
 ---
 
@@ -23,6 +24,8 @@ Parse `$ARGUMENTS`:
 - `--limit <N>` → `LIMIT` (default 5; clamp 1-20)
 - `--min-confidence <0.0-1.0>` → `MIN_CONF` (default 0.4 = confidence 2/5)
 - `--source <mcp|file|both>` → `SOURCE` (default `both`)
+- `--no-cache` → skip cache layer (Step 2.5); force fresh query
+- `--cache-ttl <seconds>` → `TTL` (default 3600 = 1h; set to 0 to disable cache reads but still write)
 
 If `KEYWORDS` empty:
 
@@ -46,6 +49,62 @@ basename "$PWD"
 Capture: `REPO_ROOT`, `PROJECT_NAME`.
 
 Repo root is best-effort context; recall is global across projects.
+
+---
+
+## Step 2.5 — Cache layer
+
+Cache file: `<REPO_ROOT>/.madd-recall-cache.json` (gitignored by `/madd-init` ≥ v2.5.0; add manually if older).
+
+### 2.5a. Compute cache key
+
+```bash
+KEY=$(printf '%s|%s|%s|%s' "$KEYWORDS" "$LIMIT" "$MIN_CONF" "$SOURCE" | shasum -a 1 | cut -d' ' -f1)
+```
+
+### 2.5b. Try cache read (skip if `--no-cache`)
+
+```bash
+test -f .madd-recall-cache.json && node -e "
+const fs = require('fs');
+const cache = JSON.parse(fs.readFileSync('.madd-recall-cache.json', 'utf8'));
+const entry = cache['$KEY'];
+const now = Date.now();
+if (!entry) { process.exit(1); }
+if ((now - entry.cached_at) > ($TTL * 1000)) { process.exit(1); }
+console.log(JSON.stringify(entry.payload));
+" 2>/dev/null
+```
+
+If cache hit and exit 0 → use cached payload, skip to Step 5 (format digest). Note source as `cache` in output. Add cache-age hint: `(cached <H>m ago)`.
+
+If cache miss or stale → proceed to Step 3.
+
+### 2.5c. Cache write hook
+
+After Step 3/4 produces results (before Step 5 formats), persist:
+
+```bash
+node -e "
+const fs = require('fs');
+const path = '.madd-recall-cache.json';
+let cache = {};
+try { cache = JSON.parse(fs.readFileSync(path, 'utf8')); } catch {}
+cache['$KEY'] = {
+  cached_at: Date.now(),
+  keywords: '$KEYWORDS',
+  payload: $PAYLOAD_JSON
+};
+// Sweep entries older than 7 days
+const week = 7 * 24 * 3600 * 1000;
+for (const k of Object.keys(cache)) {
+  if ((Date.now() - cache[k].cached_at) > week) delete cache[k];
+}
+fs.writeFileSync(path, JSON.stringify(cache, null, 2));
+"
+```
+
+Cache is local-only. Don't ship.
 
 ---
 
@@ -159,8 +218,10 @@ Failed:
 
 Top of output (one line):
 ```
-Found <N> matching learning(s) for "<KEYWORDS>" (source: <SOURCE>, min-confidence: <MIN_CONF>)
+Found <N> matching learning(s) for "<KEYWORDS>" (source: <SOURCE | cache>, min-confidence: <MIN_CONF>)
 ```
+
+If served from cache, append `(cached <minutes>m ago, ttl <TTL>s)`.
 
 Bottom of output (one line):
 ```
@@ -212,3 +273,6 @@ In structured-return mode, after the digest, append a machine-parseable JSON env
 - File-mode confidence filter rounds up. `MIN_CONF=0.4` → require ≥ 2/5; `MIN_CONF=0.7` → require ≥ 4/5.
 - For `/madd-ship` callers: ALWAYS pass `--from-ship` so structured envelope is returned for downstream `AskUserQuestion`.
 - This skill does **not** auto-apply learnings to a spec — surfaces them only. The user (or `/madd-ship` Phase 1) decides what to inherit.
+- Cache (`.madd-recall-cache.json`) is keyed on `KEYWORDS|LIMIT|MIN_CONF|SOURCE`. Changing any parameter forces re-fetch. TTL defaults 1h — long enough for spec-iteration loops, short enough that fresh `/madd-learn` writes surface in the next session.
+- Cache file is local-only. Gitignored by `/madd-init` ≥ v2.5.0. Older repos: `echo '.madd-recall-cache.json' >> .gitignore`.
+- Cache sweeps entries older than 7 days on each write — no manual rotation needed.

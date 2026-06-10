@@ -51,6 +51,24 @@ SKILLS=(
   madd-post-learn
 )
 
+# /madd-ship phase sub-runbooks (loaded on demand by madd-ship.md orchestrator)
+SHIP_PHASES=(
+  phase-1-spec
+  phase-2-schema
+  phase-3-tests-red
+  phase-4-impl
+  phase-5-green
+  phase-6-ci
+  phase-7-uat
+  phase-8-prod
+)
+
+# /madd-init shape sub-runbooks (loaded only when shape matches)
+INIT_SHAPES=(
+  monorepo
+  workspace
+)
+
 # Color output (skip if not TTY)
 if [ -t 1 ]; then
   GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -135,6 +153,40 @@ for skill in "${SKILLS[@]}"; do
     INSTALLED=$((INSTALLED + 1))
   else
     warn "  ✗ ${skill} (not found at ${url}; skipping)"
+    rm -f "${target}.tmp"
+    SKIPPED=$((SKIPPED + 1))
+  fi
+done
+
+# --- /madd-ship phase sub-runbooks ---
+log "Installing /madd-ship phase sub-runbooks..."
+mkdir -p "${COMMANDS_DIR}/madd-ship-phases"
+for phase in "${SHIP_PHASES[@]}"; do
+  target="${COMMANDS_DIR}/madd-ship-phases/${phase}.md"
+  url="${REPO_BASE}/commands/madd-ship-phases/${phase}.md"
+  if curl -fsSL "${url}" -o "${target}.tmp" 2>/dev/null; then
+    mv "${target}.tmp" "${target}"
+    log "  ✓ madd-ship-phases/${phase}"
+    INSTALLED=$((INSTALLED + 1))
+  else
+    warn "  ✗ madd-ship-phases/${phase} (not found; skipping)"
+    rm -f "${target}.tmp"
+    SKIPPED=$((SKIPPED + 1))
+  fi
+done
+
+# --- /madd-init shape sub-runbooks ---
+log "Installing /madd-init shape sub-runbooks..."
+mkdir -p "${COMMANDS_DIR}/madd-init-shapes"
+for shape in "${INIT_SHAPES[@]}"; do
+  target="${COMMANDS_DIR}/madd-init-shapes/${shape}.md"
+  url="${REPO_BASE}/commands/madd-init-shapes/${shape}.md"
+  if curl -fsSL "${url}" -o "${target}.tmp" 2>/dev/null; then
+    mv "${target}.tmp" "${target}"
+    log "  ✓ madd-init-shapes/${shape}"
+    INSTALLED=$((INSTALLED + 1))
+  else
+    warn "  ✗ madd-init-shapes/${shape} (not found; skipping)"
     rm -f "${target}.tmp"
     SKIPPED=$((SKIPPED + 1))
   fi
