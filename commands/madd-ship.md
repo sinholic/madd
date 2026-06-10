@@ -18,7 +18,7 @@ changelog: |
 
 You are executing `/madd-ship`. Feature description: **$ARGUMENTS**
 
-This file is the **orchestrator**. Pre-flight (Step 0) is mandatory and inline. Phases 1-8 live in `commands/madd-ship-phases/phase-N-*.md` — load each via `Read` only when entering that phase. This split keeps the baseline runbook ~280 lines vs the v3.1 monolithic ~975.
+This file is the **orchestrator**. Pre-flight (Step 0) is mandatory and inline. Phases 1-8 live in `commands/madd-ship-phases/phase-N-*.md` — load each via `Read` only when entering that phase. Orchestrator is ~390 lines (Step 0 + phase dispatch + agent delegation + commit prefix table + failure modes + caveats), vs the v3.1 monolithic ~975. Phase files are 32-99 lines each, loaded on demand.
 
 ---
 
@@ -77,13 +77,32 @@ If any required field missing after merge → ask user to fill or re-run `/madd-
 
 ### 0f. Detect package manager drift
 
-`Bash`:
+`Bash` — collect both signals, then apply precedence:
 ```bash
-test -f package.json && jq -r '.packageManager // empty' package.json 2>/dev/null
-for f in pnpm-lock.yaml yarn.lock bun.lockb package-lock.json; do test -f $f && echo $f; done
+PM_FIELD=$(jq -r '.packageManager // empty' package.json 2>/dev/null | sed 's/@.*//')
+PM_LOCK=""
+for f in pnpm-lock.yaml yarn.lock bun.lockb package-lock.json; do
+  if [ -f "$f" ]; then
+    case "$f" in
+      pnpm-lock.yaml)     PM_LOCK="pnpm"; break ;;
+      yarn.lock)          PM_LOCK="yarn"; break ;;
+      bun.lockb)          PM_LOCK="bun";  break ;;
+      package-lock.json)  PM_LOCK="npm";  break ;;
+    esac
+  fi
+done
+
+# Precedence: lockfile > packageManager field > AGENTS.md > unset
+if [ -n "$PM_LOCK" ]; then PM_DETECTED="$PM_LOCK"
+elif [ -n "$PM_FIELD" ]; then PM_DETECTED="$PM_FIELD"
+else PM_DETECTED=""
+fi
+echo "PM_FIELD=$PM_FIELD  PM_LOCK=$PM_LOCK  PM_DETECTED=$PM_DETECTED"
 ```
 
-If detected PM ≠ AGENTS.md → warn, ask. Lockfile wins by default.
+Compare `PM_DETECTED` against AGENTS.md `PACKAGE_MANAGER`. If mismatch → warn, ask which to trust. **Lockfile wins by default** (codified above): a checked-in `pnpm-lock.yaml` is ground truth even if `packageManager` field disagrees, because CI / `pnpm install --frozen-lockfile` will use the lockfile.
+
+If `PM_FIELD` and `PM_LOCK` both set and disagree → flag as drift; user picks. Lockfile remains the default.
 
 ### 0g. Determine work size
 
@@ -213,6 +232,14 @@ If present, parse `state.feature`, `state.branch`, `state.phase`, `state.phase_s
   - "Show state, then decide" — Read full state; loop back
   - "Checkpoint + start fresh" — invoke `/madd-checkpoint --note auto-pre-fresh`, then 0j.c
   - "Start fresh (discard state)" — wipe state, warn loudly, then 0j.c
+
+**Capture `RESUME_FROM`** — on "Resume from phase <N>" or `--resume` flag:
+
+```
+RESUME_FROM = parseInt(state.phase, 10)
+```
+
+`RESUME_FROM` must be set before phase dispatch (line "Resume case: if 0j set `RESUME_FROM = N`..." below) reads it. On fresh / discard / checkpoint paths, `RESUME_FROM` stays unset → phase dispatch starts at Phase 1.
 
 ### 0j.c. Initialize / refresh state
 

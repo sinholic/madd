@@ -1,3 +1,8 @@
+---
+version: "2.5.0"
+parent: "madd-init.md"
+---
+
 # Step 1.7 — Multi-repo workspace flow (sub-runbook)
 
 You entered this sub-file from `madd-init.md` Step 1.5c because SHAPE = WORKSPACE.

@@ -1,3 +1,8 @@
+---
+version: "3.2.0"
+parent: "madd-ship.md"
+---
+
 # Phase 7 — Staging UAT
 
 **Skip entire phase if** `SHIP_MODE == "Hotfix"`.

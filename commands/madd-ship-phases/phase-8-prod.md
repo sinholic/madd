@@ -1,3 +1,8 @@
+---
+version: "3.2.0"
+parent: "madd-ship.md"
+---
+
 # Phase 8 — Production
 
 ## 8a. Promote PR/MR + merge to base
@@ -67,9 +72,9 @@ git push
 Always prompt:
 
 > Phase 8 complete. Capture learnings:
->   `/madd-learn <feature-name> --confidence <1-5> --tags <tags>`
+> `/madd-learn <feature-name> --confidence <1-5> --tags <tags>`
 > Or interactive:
->   `/madd-learn <feature-name>`
+> `/madd-learn <feature-name>`
 
 Do not auto-run. `madd-post-learn` skill will also fire passively on merge detection.
 

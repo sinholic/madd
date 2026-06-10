@@ -1,3 +1,8 @@
+---
+version: "2.5.0"
+parent: "madd-init.md"
+---
+
 # Step 1.6 — Monorepo flow (sub-runbook)
 
 You entered this sub-file from `madd-init.md` Step 1.5c because SHAPE = MONOREPO. Workspace marker + members enumeration follows.

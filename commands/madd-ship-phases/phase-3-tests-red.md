@@ -1,3 +1,8 @@
+---
+version: "3.2.0"
+parent: "madd-ship.md"
+---
+
 # Phase 3 — Tests (Red)
 
 ## 3a. Pre-stub for typed langs

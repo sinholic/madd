@@ -1,3 +1,8 @@
+---
+version: "3.2.0"
+parent: "madd-ship.md"
+---
+
 # Phase 1 — Spec
 
 You entered Phase 1 from `/madd-ship` orchestrator. State + AGENTS.md fields are in scope.

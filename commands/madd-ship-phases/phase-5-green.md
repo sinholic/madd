@@ -1,3 +1,8 @@
+---
+version: "3.2.0"
+parent: "madd-ship.md"
+---
+
 # Phase 5 — Green & Refactor
 
 ## 5a. Confirm all green

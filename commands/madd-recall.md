@@ -64,16 +64,19 @@ KEY=$(printf '%s|%s|%s|%s' "$KEYWORDS" "$LIMIT" "$MIN_CONF" "$SOURCE" | shasum -
 
 ### 2.5b. Try cache read (skip if `--no-cache`)
 
+Pass key + TTL via env vars (never interpolate into JS — KEYWORDS may contain `'`/`"`/`$`).
+
 ```bash
-test -f .madd-recall-cache.json && node -e "
-const fs = require('fs');
-const cache = JSON.parse(fs.readFileSync('.madd-recall-cache.json', 'utf8'));
-const entry = cache['$KEY'];
-const now = Date.now();
-if (!entry) { process.exit(1); }
-if ((now - entry.cached_at) > ($TTL * 1000)) { process.exit(1); }
-console.log(JSON.stringify(entry.payload));
-" 2>/dev/null
+test -f .madd-recall-cache.json && \
+KEY="$KEY" TTL="$TTL" node -e '
+const fs = require("fs");
+const cache = JSON.parse(fs.readFileSync(".madd-recall-cache.json", "utf8"));
+const entry = cache[process.env.KEY];
+const ttlMs = parseInt(process.env.TTL, 10) * 1000;
+if (!entry) process.exit(1);
+if ((Date.now() - entry.cached_at) > ttlMs) process.exit(1);
+process.stdout.write(JSON.stringify(entry.payload));
+' 2>/dev/null
 ```
 
 If cache hit and exit 0 → use cached payload, skip to Step 5 (format digest). Note source as `cache` in output. Add cache-age hint: `(cached <H>m ago)`.
@@ -82,29 +85,44 @@ If cache miss or stale → proceed to Step 3.
 
 ### 2.5c. Cache write hook
 
-After Step 3/4 produces results (before Step 5 formats), persist:
+After Step 3/4 produces results (before Step 5 formats), persist. Pass key + payload via env vars; parse + validate JSON before write; atomic via temp file + rename.
 
 ```bash
-node -e "
-const fs = require('fs');
-const path = '.madd-recall-cache.json';
+KEY="$KEY" KEYWORDS="$KEYWORDS" PAYLOAD_JSON="$PAYLOAD_JSON" node -e '
+const fs = require("fs");
+const path = require("path");
+const cachePath = ".madd-recall-cache.json";
+const tmpPath = cachePath + ".tmp." + process.pid;
+
 let cache = {};
-try { cache = JSON.parse(fs.readFileSync(path, 'utf8')); } catch {}
-cache['$KEY'] = {
+try { cache = JSON.parse(fs.readFileSync(cachePath, "utf8")); } catch {}
+
+// Validate PAYLOAD_JSON before storing
+let payload;
+try { payload = JSON.parse(process.env.PAYLOAD_JSON); }
+catch (e) { console.error("Invalid PAYLOAD_JSON; cache skip"); process.exit(1); }
+
+cache[process.env.KEY] = {
   cached_at: Date.now(),
-  keywords: '$KEYWORDS',
-  payload: $PAYLOAD_JSON
+  keywords: process.env.KEYWORDS || "",
+  payload
 };
+
 // Sweep entries older than 7 days
 const week = 7 * 24 * 3600 * 1000;
 for (const k of Object.keys(cache)) {
   if ((Date.now() - cache[k].cached_at) > week) delete cache[k];
 }
-fs.writeFileSync(path, JSON.stringify(cache, null, 2));
-"
+
+// Atomic write: temp file + rename
+fs.writeFileSync(tmpPath, JSON.stringify(cache, null, 2));
+fs.renameSync(tmpPath, cachePath);
+'
 ```
 
 Cache is local-only. Don't ship.
+
+Failure-safe: if `PAYLOAD_JSON` invalid → write skipped, cache untouched, exit 1. Caller falls through to next call's fresh fetch.
 
 ---
 

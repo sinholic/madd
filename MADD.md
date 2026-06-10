@@ -6,7 +6,7 @@ Framework for SDD+TDD end-to-end feature delivery. Ships commands, hooks, and sk
 
 ## Current version: 2.0.1
 
-Released: 2026-06-11
+Released: Unreleased (PR #2 open)
 
 ---
 
@@ -86,7 +86,7 @@ Released: 2026-06-11
 - `/madd-status` (per-check): 3-8k → **0.5-1.5k** (~80% reduction)
 - `/madd-recall` cache hit (within TTL): 5-10k → **<1k**
 
-**No behavior changes** — same gates, hooks, state writes. Files just live in different places.
+**No functional changes** — same gates, hooks, state writes, and file contracts. Default output for `/madd-status` changed to terse (opt-in `--full` for the v1.0.0 box-drawing digest). Extracted phase/shape sub-files preserve all behavior; only load timing differs.
 
 ### 2.0.0 (2026-06-11) — Control center: hooks, skills, state, recall
 

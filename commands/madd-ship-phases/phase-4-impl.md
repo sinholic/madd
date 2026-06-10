@@ -1,3 +1,8 @@
+---
+version: "3.2.0"
+parent: "madd-ship.md"
+---
+
 # Phase 4 — Implementation
 
 ## 4a. Implement in dependency order

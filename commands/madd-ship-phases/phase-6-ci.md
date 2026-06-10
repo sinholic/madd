@@ -1,3 +1,8 @@
+---
+version: "3.2.0"
+parent: "madd-ship.md"
+---
+
 # Phase 6 — CI / Build gate
 
 ## 6a. Full check suite
