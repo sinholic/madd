@@ -19,7 +19,7 @@ You were triggered because the user opened a project with `.madd-ship-state.json
 
 2. **Present a 3-option resume gate** via `AskUserQuestion`:
 
-   - **"Resume from phase <N>"** — invoke `/madd-ship <feature>` (description from state). The ship runbook's Step 0j will detect the existing state and prompt resume confirmation. (Recommended)
+   - **"Resume from phase <N+1>"** (state `phase` = last completed phase; resume continues at the next one) — invoke `/madd-ship <feature>` (description from state). The ship runbook's Step 0j will detect the existing state and prompt resume confirmation. (Recommended)
    - **"Show me the spec / what's been done"** — `Read` the state file's `spec` field and recent commits before deciding.
    - **"Abandon this ship cycle"** — print a warning, then offer to run `/madd-checkpoint --note abandoned` so the state is recoverable before deletion.
 

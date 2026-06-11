@@ -1,8 +1,9 @@
 ---
 description: "Drive end-to-end feature delivery: Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT → Production. SDD+TDD in 8 phases. Persists .madd-ship-state.json for resume + hook enforcement. Recalls prior learnings before spec. Work-type routing: FE→/madd-design, DevOps→/madd-devops, Robot→/madd-robot, Data→/madd-data."
 argument-hint: "<feature description> [--member <name>] [--base <branch>] [--no-new-branch] [--resume] [--fresh]"
-version: "3.2.0"
+version: "3.2.1"
 changelog: |
+  3.2.1 — Resume off-by-one fix: state.phase = last COMPLETED phase, RESUME_FROM = phase+1; resume respects SHIP_MODE skip rules; RESUME_FROM > 8 routes to cleanup
   3.2.0 — Phase bodies split into commands/madd-ship-phases/phase-{1-8}-*.md; orchestrator loads each phase file only when entering that phase. Cuts initial runbook load ~70%
   3.1.0 — Persistent state (.madd-ship-state.json) + resume protocol (Step 0j); file-tree work-type detection augments Step 0i keyword pass; Phase 1a auto-invokes /madd-recall to surface prior learnings; phase-boundary state writes power madd-phase-guard.sh hook
   3.0.0 — Work-type routing (Step 0i): auto-detect FE/BE/DevOps/Robot/Data; redirect Robot+Data to specialist skills; Phase 7d domain-specific UAT validation
@@ -216,6 +217,8 @@ If MISSING → no resume; jump to 0j.c (init fresh state) → load Phase 1.
 
 If present, parse `state.feature`, `state.branch`, `state.phase`, `state.phase_started`.
 
+**Semantics:** `state.phase` records the last **completed** phase (phase files write `phase = N` at the end of phase N). Resume therefore continues at `phase + 1`.
+
 **Reconciliation:**
 
 | state.feature | $ARGS feature | state.branch | current branch | Action |
@@ -226,18 +229,20 @@ If present, parse `state.feature`, `state.branch`, `state.phase`, `state.phase_s
 | matches | empty | matches | matches | Resume offer (no args = resume request) |
 
 `AskUserQuestion` (skip if `--resume` or `--fresh` flagged):
-- "Existing ship state for `<state.feature>` at phase <state.phase>. Resume or fresh?"
+- "Existing ship state for `<state.feature>` — phase <state.phase> completed. Resume or fresh?"
 - options:
-  - "Resume from phase <N>" — load state, skip to that phase file
+  - "Resume from phase <N+1>" — load state, skip to the next uncompleted phase file
   - "Show state, then decide" — Read full state; loop back
   - "Checkpoint + start fresh" — invoke `/madd-checkpoint --note auto-pre-fresh`, then 0j.c
   - "Start fresh (discard state)" — wipe state, warn loudly, then 0j.c
 
-**Capture `RESUME_FROM`** — on "Resume from phase <N>" or `--resume` flag:
+**Capture `RESUME_FROM`** — on "Resume from phase <N+1>" or `--resume` flag:
 
 ```
-RESUME_FROM = parseInt(state.phase, 10)
+RESUME_FROM = parseInt(state.phase, 10) + 1
 ```
+
+`state.phase` is the last completed phase, so resume starts at the next one. If `RESUME_FROM > 8` → ship already complete; offer Phase 8d/8e cleanup instead.
 
 `RESUME_FROM` must be set before phase dispatch (line "Resume case: if 0j set `RESUME_FROM = N`..." below) reads it. On fresh / discard / checkpoint paths, `RESUME_FROM` stays unset → phase dispatch starts at Phase 1.
 
@@ -279,7 +284,7 @@ At each `**[state]**` callout in a phase file:
 node -e "
 const fs = require('fs');
 const j = JSON.parse(fs.readFileSync('.madd-ship-state.json', 'utf8'));
-// updates here, e.g.:
+// updates here, e.g. (phase is set to N only when phase N COMPLETES):
 j.phase = '4';
 j.phase_started = new Date().toISOString();
 j.tests_red_confirmed = true;
@@ -306,7 +311,7 @@ Now load + execute each phase file in order. Use `Read` on the phase file, then 
 | 7 | `commands/madd-ship-phases/phase-7-uat.md` | `SHIP_MODE == "Hotfix"` |
 | 8 | `commands/madd-ship-phases/phase-8-prod.md` | never |
 
-Resume case: if 0j set `RESUME_FROM = N`, skip directly to phase N's file. Don't re-run earlier phases.
+Resume case: if 0j set `RESUME_FROM = N`, skip directly to phase N's file (N = last completed + 1). Don't re-run earlier phases. Skip rules above still apply — if phase N is skipped for the current `SHIP_MODE`, advance to the next non-skipped phase.
 
 Each phase file ends with "Return to orchestrator → load `phase-<N+1>-*.md`". Follow that pointer.
 
