@@ -16,6 +16,12 @@ Spec → Schema → Tests Red → Impl → Green → Refactor → CI → UAT →
 curl -fsSL https://raw.githubusercontent.com/sinholic/madd/main/install.sh | bash
 ```
 
+Pin to a release tag instead of `main`:
+
+```bash
+MADD_REF=v3.2.1 curl -fsSL https://raw.githubusercontent.com/sinholic/madd/main/install.sh | bash
+```
+
 Restart Claude Code. Then in any project:
 
 ```bash
@@ -90,6 +96,7 @@ Update later:
 
 - [Claude Code](https://claude.ai/code)
 - `git`, `curl`, `bash`
+- `node` — **required for hooks** (phase-guard, commit-prefix, no-debug-code parse tool input with Node.js; without it they silently no-op)
 - `jq` (recommended for stack detection)
 - Optional: `agentmemory` MCP server for learning storage
 
@@ -133,14 +140,10 @@ See [`examples/`](./examples/):
 ## Uninstall
 
 ```bash
-rm ~/.claude/commands/madd-init.md
-rm ~/.claude/commands/madd-ship.md
-rm ~/.claude/commands/madd-learn.md
-rm ~/.claude/commands/madd-update.md
-rm ~/.claude/MADD.config
+curl -fsSL https://raw.githubusercontent.com/sinholic/madd/main/uninstall.sh | bash
 ```
 
-Backups remain in `~/.claude/commands/.backup/`.
+Removes all 16 commands, hooks, skills, and sub-runbooks. Keeps `MADD.config` and backups (`~/.claude/{commands,hooks,skills}/.backup/`) — pass `--purge` to remove those too. Per-project files (`AGENTS.md`, `WORKLOG.md`, hook entries in `.claude/settings.json`) are left alone.
 
 ---
 

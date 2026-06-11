@@ -11,7 +11,10 @@
 
 set -euo pipefail
 
-REPO_BASE="${MADD_REPO_BASE:-https://raw.githubusercontent.com/sinholic/madd/main}"
+# Pin to a tag/branch/commit with MADD_REF (default: main)
+#   MADD_REF=v3.2.1 curl -fsSL .../install.sh | bash
+MADD_REF="${MADD_REF:-main}"
+REPO_BASE="${MADD_REPO_BASE:-https://raw.githubusercontent.com/sinholic/madd/${MADD_REF}}"
 COMMANDS_DIR="${HOME}/.claude/commands"
 HOOKS_DIR="${HOME}/.claude/hooks"
 SKILLS_DIR="${HOME}/.claude/skills"
@@ -82,6 +85,7 @@ err()  { printf "${RED}[madd]${NC} %s\n" "$*" >&2; }
 
 # Pre-flight
 command -v curl >/dev/null 2>&1 || { err "curl required"; exit 1; }
+command -v node >/dev/null 2>&1 || warn "node not found — MADD hooks (phase-guard, commit-prefix, no-debug-code) require Node.js to parse tool input; they will silently no-op without it"
 
 log "Installing MADD"
 log "  commands → ${COMMANDS_DIR}"
@@ -141,10 +145,10 @@ done
 log "Installing skills..."
 for skill in "${SKILLS[@]}"; do
   target_dir="${SKILLS_DIR}/${skill}"
-  mkdir -p "${target_dir}"
+  mkdir -p "${target_dir}" "${SKILLS_DIR}/.backup"
   target="${target_dir}/SKILL.md"
   if [ -f "${target}" ]; then
-    cp "${target}" "${HOOKS_DIR}/.backup/${skill}-SKILL.md.bak.${TS}"
+    cp "${target}" "${SKILLS_DIR}/.backup/${skill}-SKILL.md.bak.${TS}"
   fi
   url="${REPO_BASE}/skills/${skill}/SKILL.md"
   if curl -fsSL "${url}" -o "${target}.tmp" 2>/dev/null; then
@@ -201,8 +205,18 @@ MADD_SOURCE=https://github.com/sinholic/madd.git
 EOF
   log "wrote ${CONFIG_FILE}"
 else
-  warn "${CONFIG_FILE} exists — left untouched"
+  warn "${CONFIG_FILE} exists — MADD_SOURCE left untouched"
 fi
+
+# Record what was installed (read by /madd-update --check for drift detection)
+SHIP_VERSION=$(grep '^version:' "${COMMANDS_DIR}/madd-ship.md" 2>/dev/null | head -1 | sed 's/version: //; s/"//g' || echo "?")
+sed -i.bak '/^MADD_INSTALLED_/d' "${CONFIG_FILE}" && rm -f "${CONFIG_FILE}.bak"
+cat >> "${CONFIG_FILE}" <<EOF
+MADD_INSTALLED_REF=${MADD_REF}
+MADD_INSTALLED_VERSION=${SHIP_VERSION}
+MADD_INSTALLED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+log "recorded install: ref=${MADD_REF} version=${SHIP_VERSION}"
 
 # --- Summary ---
 echo
