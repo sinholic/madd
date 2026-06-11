@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# madd-hook-version: 2.0.0
+# madd-hook-version: 2.1.0
 # madd-commit-prefix.sh — PreToolUse hook: enforce MADD commit prefix discipline
 #
 # Allowed prefixes (per madd-ship.md Commit prefix discipline table):
@@ -35,23 +35,28 @@ if [ "$OPTED_IN" = "0" ] && [ -f "$REPO_ROOT/AGENTS.md" ]; then
 fi
 [ "$OPTED_IN" = "0" ] && exit 0
 
-# Extract -m message (single or double quoted, handles heredoc by skipping)
+# Extract commit message.
+# Heredoc commits (git commit -m "$(cat <<'EOF' ... EOF)") — extract first
+# non-empty body line as subject. This is Claude Code's default commit style,
+# so skipping heredocs would make the hook a no-op in practice.
 MSG=""
-if [[ "$CMD" =~ -m[[:space:]]+\"([^\"]+)\" ]]; then
-  MSG="${BASH_REMATCH[1]}"
-elif [[ "$CMD" =~ -m[[:space:]]+\'([^\']+)\' ]]; then
-  MSG="${BASH_REMATCH[1]}"
+if printf '%s\n' "$CMD" | grep -qE "<<-?[[:space:]]*['\"]?EOF"; then
+  MSG=$(printf '%s\n' "$CMD" \
+    | sed -n "/<<-\{0,1\}[[:space:]]*['\"]\{0,1\}EOF/,/^[[:space:]]*EOF['\"]\{0,1\}[[:space:]]*$/p" \
+    | sed '1d;$d' \
+    | grep -m1 -v '^[[:space:]]*$' || true)
+# -m / --message, quoted, with or without space/= before the quote:
+#   -m "msg"   -m"msg"   -m 'msg'   --message="msg"   --message "msg"
+elif [[ "$CMD" =~ (-m|--message)([[:space:]]*|=)\"([^\"]+)\" ]]; then
+  MSG="${BASH_REMATCH[3]}"
+elif [[ "$CMD" =~ (-m|--message)([[:space:]]*|=)\'([^\']+)\' ]]; then
+  MSG="${BASH_REMATCH[3]}"
 fi
 
-# Heredoc commits — skip (cannot validate without expansion)
-if echo "$CMD" | grep -qE '<<-?[[:space:]]*[\x27"]?EOF'; then
-  exit 0
-fi
-
-# No -m at all → skip (interactive editor commit)
+# No extractable message → skip (interactive editor commit)
 [ -z "$MSG" ] && exit 0
 
-SUBJECT=$(echo "$MSG" | head -1)
+SUBJECT=$(echo "$MSG" | head -1 | sed 's/^[[:space:]]*//')
 
 # Allowed prefix regex. Matches:
 #   schema:  stub:  test(red):  feat[(scope)]:  refactor[(scope)]:  fix[(scope)]:  Rollback:
