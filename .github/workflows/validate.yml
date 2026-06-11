@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check skill frontmatter
+      - name: Check command frontmatter
         run: |
           fail=0
           for skill in commands/madd-*.md; do
@@ -21,8 +21,41 @@ jobs:
           done
           exit $fail
 
-      - name: Check install.sh syntax
-        run: bash -n install.sh
+      - name: Check sub-runbook frontmatter
+        run: |
+          fail=0
+          for f in commands/madd-ship-phases/*.md commands/madd-init-shapes/*.md; do
+            echo "Checking $f"
+            head -10 "$f" | grep -q '^version:' || { echo "MISSING version: $f"; fail=1; }
+            head -10 "$f" | grep -q '^parent:' || { echo "MISSING parent: $f"; fail=1; }
+          done
+          exit $fail
 
-      - name: Check install.sh executable
-        run: test -x install.sh || { echo "install.sh not executable"; exit 1; }
+      - name: Check SKILL.md frontmatter
+        run: |
+          fail=0
+          for f in skills/*/SKILL.md; do
+            echo "Checking $f"
+            head -10 "$f" | grep -q '^name:' || { echo "MISSING name: $f"; fail=1; }
+            head -20 "$f" | grep -q '^description:' || { echo "MISSING description: $f"; fail=1; }
+          done
+          exit $fail
+
+      - name: Shell syntax (install, uninstall, hooks)
+        run: |
+          bash -n install.sh
+          bash -n uninstall.sh
+          for h in hooks/*.sh; do echo "bash -n $h"; bash -n "$h"; done
+
+      - name: Scripts executable
+        run: |
+          test -x install.sh || { echo "install.sh not executable"; exit 1; }
+          test -x uninstall.sh || { echo "uninstall.sh not executable"; exit 1; }
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning install.sh uninstall.sh hooks/*.sh
+
+      - name: Hook smoke tests
+        run: bash tests/hook-smoke-test.sh
