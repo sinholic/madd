@@ -2,6 +2,11 @@
 
 Per-command version history also lives in each command's frontmatter (`commands/madd-*.md`).
 
+## Unreleased
+
+### Fixed
+- **no-debug-code hook** (v2.2.0): Go `fmt.Println` in `cmd/**` / `main.go` and Ruby `puts` in `bin/**` / `exe/**` no longer blocked — stdout is the product in CLI entrypoints, not debug leftovers. New `.madd-no-debug-code.allow` file at repo root takes one glob per line (matched against repo-relative path and basename, `#` comments) for project-specific exemptions without disabling the hook entirely.
+
 ## 3.2.1 — 2026-06-11
 
 ### Fixed

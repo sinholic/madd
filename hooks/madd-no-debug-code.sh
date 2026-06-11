@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# madd-hook-version: 2.0.0
+# madd-hook-version: 2.2.0
 # madd-no-debug-code.sh — PreToolUse hook: reject debug code in source files
 #
 # Blocks (exit 2) when Edit/Write would add console.log / debugger; / print( / dbg!(
 # to a non-test source file. Test paths are exempt:
 #   *test*  *.test.*  *.spec.*  __tests__/  tests/  /test/
 #
-# Honors per-repo opt-out: .madd-no-debug-code.disabled file at repo root.
+# CLI-output paths are exempt (stdout IS the product there):
+#   Go:   cmd/**, main.go        Ruby: bin/**, Rakefile, *.rake
+#
+# Per-repo escape hatches at repo root:
+#   .madd-no-debug-code.disabled — disable hook entirely
+#   .madd-no-debug-code.allow    — one glob per line (matched against
+#                                  repo-relative path and basename); # comments
+#
 # Uses Node.js for JSON parsing (no jq dependency).
 
 set -u
@@ -27,6 +34,25 @@ if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/.madd-no-debug-code.disabled" ]; then
   exit 0
 fi
 
+# Repo-relative path (for allowlist + CLI-path exemptions)
+REL="$FILE"
+if [ -n "$REPO_ROOT" ]; then
+  REL="${FILE#"$REPO_ROOT"/}"
+fi
+
+# Allowlist check — .madd-no-debug-code.allow: one glob per line, # comments.
+# Patterns match against the repo-relative path and the basename.
+ALLOW_FILE="$REPO_ROOT/.madd-no-debug-code.allow"
+if [ -n "$REPO_ROOT" ] && [ -f "$ALLOW_FILE" ]; then
+  while IFS= read -r pat; do
+    case "$pat" in ''|\#*) continue ;; esac
+    # shellcheck disable=SC2254  # globs must stay unquoted to match
+    case "$REL" in $pat) exit 0 ;; esac
+    # shellcheck disable=SC2254
+    case "$(basename "$FILE")" in $pat) exit 0 ;; esac
+  done < "$ALLOW_FILE"
+fi
+
 # Test-path exemption — match basename or explicit test dirs only.
 # (Avoid bare *test* substring — it triggers on harmless paths like /tmp/hook-test/src/foo.ts.)
 BASENAME=$(basename "$FILE")
@@ -35,6 +61,20 @@ case "$BASENAME" in
 esac
 case "$FILE" in
   */__tests__/*|*/__test__/*|*/tests/*|*/test/*|*/spec/*|*/specs/*|*/e2e/*|*/integration/*) exit 0 ;;
+esac
+
+# CLI-output path exemptions — stdout is the product, not debug leftovers.
+case "$FILE" in
+  *.go)
+    case "$REL" in
+      cmd/*|*/cmd/*|main.go|*/main.go) exit 0 ;;
+    esac
+    ;;
+  *.rb)
+    case "$REL" in
+      bin/*|*/bin/*|exe/*|*/exe/*) exit 0 ;;
+    esac
+    ;;
 esac
 
 # Pick patterns by file extension
