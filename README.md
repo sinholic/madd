@@ -72,7 +72,7 @@ Update later:
 
 - `madd-phase-guard.sh` — blocks `feat:` commits before Phase 3 RED gate; blocks push before Phase 6 green
 - `madd-commit-prefix.sh` — enforces `schema:/stub:/test(red):/feat:/refactor:/fix:/Rollback:`
-- `madd-no-debug-code.sh` — rejects `console.log`/`print(`/`dbg!(`/`debugger;` in non-test source
+- `madd-no-debug-code.sh` — rejects `console.log`/`print(`/`dbg!(`/`debugger;` in non-test source. CLI entrypoints exempt (Go `cmd/**`+`main.go`, Ruby `bin/**`+`exe/**`); per-repo glob allowlist via `.madd-no-debug-code.allow`
 
 ### Auto-trigger skills (`~/.claude/skills/`)
 

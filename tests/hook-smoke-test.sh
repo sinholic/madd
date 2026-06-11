@@ -13,7 +13,7 @@ STATE="$REPO_ROOT/.madd-ship-state.json"
 PASS=0
 FAIL=0
 
-cleanup() { rm -f "$STATE"; }
+cleanup() { rm -f "$STATE" "$REPO_ROOT/.madd-no-debug-code.allow"; }
 trap cleanup EXIT
 
 bash_input() {
@@ -77,6 +77,14 @@ assert madd-no-debug-code.sh "$(write_input 'src/foo.ts' 'console.log("debug")')
 assert madd-no-debug-code.sh "$(write_input 'src/foo.test.ts' 'console.log("ok")')" 0 'console.log in test allowed'
 assert madd-no-debug-code.sh "$(write_input 'src/foo.ts' 'const x = 1;')"           0 'clean source allowed'
 assert madd-no-debug-code.sh "$(write_input 'app/main.py' 'print("debug")')"        2 'print in python blocked'
+assert madd-no-debug-code.sh "$(write_input 'cmd/root.go' 'fmt.Println("usage")')"  0 'go cmd/ CLI output allowed'
+assert madd-no-debug-code.sh "$(write_input 'main.go' 'fmt.Println("usage")')"      0 'go main.go CLI output allowed'
+assert madd-no-debug-code.sh "$(write_input 'pkg/core/run.go' 'fmt.Println("dbg")')" 2 'go pkg fmt.Println blocked'
+assert madd-no-debug-code.sh "$(write_input 'bin/cli.rb' 'puts result ')"           0 'ruby bin/ puts allowed'
+echo 'scripts/release.go' > "$REPO_ROOT/.madd-no-debug-code.allow"
+assert madd-no-debug-code.sh "$(write_input 'scripts/release.go' 'fmt.Println("x")')" 0 'allowlist glob match allowed'
+assert madd-no-debug-code.sh "$(write_input 'pkg/core/run.go' 'fmt.Println("x")')"  2 'non-allowlisted still blocked'
+rm -f "$REPO_ROOT/.madd-no-debug-code.allow"
 
 echo
 echo "passed=$PASS failed=$FAIL"
