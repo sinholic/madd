@@ -355,7 +355,7 @@ Phase files to follow (read in order):
 Task: Execute Phases 2-6. Stop and report before Phase 7 UAT.
 ```
 
-`Agent` tool, `subagent_type: "general-purpose"`. **Never delegate Phase 1** — spec decisions stay in main.
+`Agent` tool, `subagent_type: "madd-executor"`. **Never delegate Phase 1** — spec decisions stay in main.
 
 ---
 
