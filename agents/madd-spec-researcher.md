@@ -1,7 +1,7 @@
 ---
 name: madd-spec-researcher
 description: Researches domain context and existing solutions for a feature spec.
-model: haiku
+model: sonnet
 tools:
   - WebSearch
   - WebFetch

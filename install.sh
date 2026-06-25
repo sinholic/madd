@@ -272,7 +272,7 @@ echo "  - madd-no-debug-code     rejects console.log/print/dbg!/debugger in non-
 echo
 echo "Sub-agents (usable via Agent tool in madd-ship):"
 echo "  - madd-executor          executes Phases 2-6 (Schema -> Tests Red -> Impl -> Green -> CI) using Sonnet"
-echo "  - madd-spec-researcher   researches domain context and patterns for specs using Haiku"
+echo "  - madd-spec-researcher   researches domain context and patterns for specs using Sonnet"
 echo "  - madd-verifier          verifies implementation against acceptance criteria using Haiku"
 echo "  - madd-review            reviews code changes for bugs/quality using Haiku"
 echo "  - madd-secure            audits code changes for security threats using Haiku"
