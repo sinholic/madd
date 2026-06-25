@@ -371,7 +371,7 @@ Inherits from [`../AGENTS.md`](../AGENTS.md) (or `../../AGENTS.md`). Below = ove
 ```markdown
 # AGENTS.md — {PROJECT_NAME}
 
-Self-onboarding guide for engineers and AI agents. Maintained by `/madd-init` v2.3.0. Updated {ISO_DATE}.
+Self-onboarding guide for engineers and AI agents. Maintained by `/madd-init` v2.5.0. Updated {ISO_DATE}.
 
 ## Stack
 
@@ -414,6 +414,34 @@ Other MADD skills:
 - `/madd-vibe` — prototype mode (new projects)
 - `/madd-update` — update MADD skills
 
+## Startup workflow
+
+Before writing code:
+1. Read this file + `WORKLOG.md` last entry to load current state.
+2. Run the Key commands verification gate to confirm a clean baseline.
+3. Pick ONE unfinished feature. Implement only that.
+
+## Scope discipline
+
+- **One feature at a time.** No drive-by refactors, no unrelated fixes. Stay in scope.
+- Out-of-scope work you spot → log in `WORKLOG.md`, do not implement now.
+- A feature closes only when it meets the Definition of Done below.
+
+## Definition of Done
+
+A change is done only when ALL hold:
+- [ ] Tests written + green (`{TEST_CMD}`)
+- [ ] Type check + lint clean (`{TYPECHECK_CMD}`, `{LINT_CMD}`)
+- [ ] Build / CI gate passes (`{BUILD_CMD}`)
+- [ ] Verification Evidence recorded in `WORKLOG.md` (command + output pasted)
+- [ ] No debug code, no commented-out blocks left
+
+Never claim done without pasting the verification command and its output.
+
+## End of session
+
+Before ending: update `WORKLOG.md` (Last Updated, Current Objective, Recommended Next Step), commit or stash, leave a clean restartable state.
+
 ## Conventions
 
 | Convention | Policy |
@@ -422,6 +450,7 @@ Other MADD skills:
 | Comments | {COMMENT_STYLE} |
 | Error handling | {ERROR_POLICY} |
 | Commit prefixes | `schema:` / `test(red):` / `feat:` / `refactor:` / `fix:` |
+| Verification evidence | Paste command + output in `WORKLOG.md` before claiming done |
 
 ## Agent delegation
 
@@ -443,7 +472,7 @@ Other MADD skills:
 - Initialized: {ISO_DATE}
 - Shape: {SHAPE}  ({single|monorepo-root|monorepo-member|workspace-repo})
 - Mode: {MODE}
-- MADD version: 2.3.0
+- MADD version: 2.5.0
 ```
 
 ---
