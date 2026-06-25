@@ -18,6 +18,7 @@ REPO_BASE="${MADD_REPO_BASE:-https://raw.githubusercontent.com/sinholic/madd/${M
 COMMANDS_DIR="${HOME}/.claude/commands"
 HOOKS_DIR="${HOME}/.claude/hooks"
 SKILLS_DIR="${HOME}/.claude/skills"
+AGENTS_DIR="${HOME}/.claude/agents"
 CONFIG_FILE="${HOME}/.claude/MADD.config"
 
 # Slash commands shipped by MADD (16 total as of 2.0)
@@ -52,6 +53,15 @@ SKILLS=(
   madd-ship-resume
   madd-pre-pr-check
   madd-post-learn
+)
+
+# MADD sub-agents
+AGENTS=(
+  madd-executor
+  madd-spec-researcher
+  madd-verifier
+  madd-review
+  madd-secure
 )
 
 # /madd-ship phase sub-runbooks (loaded on demand by madd-ship.md orchestrator)
@@ -91,10 +101,12 @@ log "Installing MADD"
 log "  commands → ${COMMANDS_DIR}"
 log "  hooks    → ${HOOKS_DIR}"
 log "  skills   → ${SKILLS_DIR}"
+log "  agents   → ${AGENTS_DIR}"
 
 mkdir -p "${COMMANDS_DIR}" "${COMMANDS_DIR}/.backup"
 mkdir -p "${HOOKS_DIR}"    "${HOOKS_DIR}/.backup"
 mkdir -p "${SKILLS_DIR}"
+mkdir -p "${AGENTS_DIR}"   "${AGENTS_DIR}/.backup"
 
 TS=$(date -u +%Y%m%d-%H%M%S)
 INSTALLED=0
@@ -162,6 +174,26 @@ for skill in "${SKILLS[@]}"; do
   fi
 done
 
+# --- Agents ---
+log "Installing agents..."
+for agent in "${AGENTS[@]}"; do
+  target="${AGENTS_DIR}/${agent}.md"
+  if [ -f "${target}" ]; then
+    cp "${target}" "${AGENTS_DIR}/.backup/${agent}.md.bak.${TS}"
+  fi
+  url="${REPO_BASE}/agents/${agent}.md"
+  if curl -fsSL "${url}" -o "${target}.tmp" 2>/dev/null; then
+    mv "${target}.tmp" "${target}"
+    version=$(grep '^version:' "${target}" 2>/dev/null | head -1 | sed 's/version: //; s/"//g' || echo "?")
+    log "  ✓ ${agent} v${version}"
+    INSTALLED=$((INSTALLED + 1))
+  else
+    warn "  ✗ ${agent} (not found at ${url}; skipping)"
+    rm -f "${target}.tmp"
+    SKIPPED=$((SKIPPED + 1))
+  fi
+done
+
 # --- /madd-ship phase sub-runbooks ---
 log "Installing /madd-ship phase sub-runbooks..."
 mkdir -p "${COMMANDS_DIR}/madd-ship-phases"
@@ -223,7 +255,7 @@ echo
 log "✓ MADD installed — ${INSTALLED} artifacts, ${SKIPPED} skipped"
 echo
 echo "Next steps:"
-echo "  1. Restart Claude Code so commands/hooks/skills are surfaced"
+echo "  1. Restart Claude Code so commands/hooks/skills/agents are surfaced"
 echo "  2. In any project:"
 echo "       /madd-init                       # Scaffold AGENTS.md + .claude/settings.json (registers MADD hooks)"
 echo "       /madd-ship <feature description> # 8-phase delivery with state persistence + recall"
@@ -237,6 +269,13 @@ echo "Phase discipline (hooks active after /madd-init):"
 echo "  - madd-phase-guard       blocks feat: before Phase 3 RED + push before Phase 6 green"
 echo "  - madd-commit-prefix     enforces schema:/stub:/test(red):/feat:/refactor:/fix:/Rollback:"
 echo "  - madd-no-debug-code     rejects console.log/print/dbg!/debugger in non-test source"
+echo
+echo "Sub-agents (usable via Agent tool in madd-ship):"
+echo "  - madd-executor          executes Phases 2-6 (Schema -> Tests Red -> Impl -> Green -> CI) using Sonnet"
+echo "  - madd-spec-researcher   researches domain context and patterns for specs using Sonnet"
+echo "  - madd-verifier          verifies implementation against acceptance criteria using Haiku"
+echo "  - madd-review            reviews code changes for bugs/quality using Haiku"
+echo "  - madd-secure            audits code changes for security threats using Haiku"
 echo
 echo "Auto-trigger skills:"
 echo "  - madd-ship-resume       offers resume when .madd-ship-state.json present"
