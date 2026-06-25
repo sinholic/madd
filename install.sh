@@ -58,6 +58,10 @@ SKILLS=(
 # MADD sub-agents
 AGENTS=(
   madd-executor
+  madd-spec-researcher
+  madd-verifier
+  madd-review
+  madd-secure
 )
 
 # /madd-ship phase sub-runbooks (loaded on demand by madd-ship.md orchestrator)
@@ -267,7 +271,11 @@ echo "  - madd-commit-prefix     enforces schema:/stub:/test(red):/feat:/refacto
 echo "  - madd-no-debug-code     rejects console.log/print/dbg!/debugger in non-test source"
 echo
 echo "Sub-agents (usable via Agent tool in madd-ship):"
-echo "  - madd-executor          executes Phases 2-6 (Schema -> Tests Red -> Impl -> Green -> CI) using Haiku"
+echo "  - madd-executor          executes Phases 2-6 (Schema -> Tests Red -> Impl -> Green -> CI) using Sonnet"
+echo "  - madd-spec-researcher   researches domain context and patterns for specs using Haiku"
+echo "  - madd-verifier          verifies implementation against acceptance criteria using Haiku"
+echo "  - madd-review            reviews code changes for bugs/quality using Haiku"
+echo "  - madd-secure            audits code changes for security threats using Haiku"
 echo
 echo "Auto-trigger skills:"
 echo "  - madd-ship-resume       offers resume when .madd-ship-state.json present"

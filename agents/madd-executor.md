@@ -1,7 +1,7 @@
 ---
 name: madd-executor
 description: Execute MADD Phase 2-6 (Schema -> Tests Red -> Impl -> Green -> CI)
-model: haiku
+model: sonnet
 ---
 
 You are a MADD Executor sub-agent. Your goal is to execute Phases 2-6 of the MADD delivery process for the current feature branch.
